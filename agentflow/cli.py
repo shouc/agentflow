@@ -423,16 +423,16 @@ def _pipeline_launch_env_override_checks(pipeline: object) -> list[DoctorCheck]:
     return checks
 
 
-def _doctor_report_for_path(path: str | None = None):
+def _doctor_report_for_path(path: str | None = None) -> tuple[object, dict[str, object] | None, object | None]:
     report = _doctor_report()
     if path is None:
         try:
             pipeline = _load_pipeline(default_smoke_pipeline_path())
         except typer.Exit:
-            return report, None
-        return _extend_doctor_report(report, _pipeline_launch_env_override_checks(pipeline)), None
+            return report, None, None
+        return _extend_doctor_report(report, _pipeline_launch_env_override_checks(pipeline)), None, pipeline
     pipeline = _load_pipeline(path)
-    return _augment_preflight_report(report, pipeline), {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)}
+    return _augment_preflight_report(report, pipeline), {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)}, pipeline
 
 
 def _preflight_shell_bridge_recommendation(report: object) -> object | None:
@@ -992,7 +992,7 @@ def check_local(
     ),
 ) -> None:
     selected_path = path or default_smoke_pipeline_path()
-    report, pipeline = _doctor_report_for_path(selected_path)
+    report, pipeline, _loaded_pipeline = _doctor_report_for_path(selected_path)
     recommendation = build_bash_login_shell_bridge_recommendation() if shell_bridge else None
     doctor_output = _structured_output_from_run_output(output)
     _echo_doctor_report(
@@ -1025,7 +1025,7 @@ def doctor(
         help="Include a ready-to-paste bash login bridge suggestion when local shell startup needs one.",
     ),
 ) -> None:
-    report, pipeline = _doctor_report_for_path(path)
+    report, pipeline, _loaded_pipeline = _doctor_report_for_path(path)
     recommendation = build_bash_login_shell_bridge_recommendation() if shell_bridge else None
     _echo_doctor_report(
         report,
