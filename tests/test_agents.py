@@ -60,6 +60,21 @@ def test_codex_adapter_uses_current_exec_flags(tmp_path):
     assert prepared.command[4:8] == ["-c", 'approval_policy="never"', "--sandbox", "read-only"]
 
 
+def test_codex_adapter_suppresses_unstable_feature_warning(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "plan",
+            "agent": "codex",
+            "prompt": "Plan",
+        }
+    )
+
+    prepared = CodexAdapter().prepare(node, "Plan", _paths(tmp_path))
+
+    assert prepared.command.count("-c") == 2
+    assert 'suppress_unstable_features_warning=true' in prepared.command
+
+
 def test_claude_adapter_uses_tools_flag_for_read_only_access(tmp_path):
     node = NodeSpec.model_validate(
         {
