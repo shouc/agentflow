@@ -8,13 +8,13 @@ from typing import Any
 
 from agentflow.agents.registry import AdapterRegistry, default_adapter_registry
 from agentflow.context import render_node_prompt
-from agentflow.prepared import ExecutionPaths
+from agentflow.prepared import ExecutionPaths, build_execution_paths
 from agentflow.runners.registry import RunnerRegistry, default_runner_registry
 from agentflow.specs import NodeAttempt, NodeResult, NodeStatus, PipelineSpec, RunEvent, RunRecord, RunStatus
 from agentflow.store import RunStore
 from agentflow.success import evaluate_success
 from agentflow.traces import create_trace_parser
-from agentflow.utils import ensure_dir, utcnow_iso
+from agentflow.utils import utcnow_iso
 
 
 @dataclass(slots=True)
@@ -101,37 +101,13 @@ class Orchestrator:
         await self._publish(run_id, "run_completed", status=record.status.value)
         await self.store.persist_run(run_id)
 
-    def _resolve_local_workdir(self, pipeline_workdir: Path, cwd: str | None) -> Path:
-        if not cwd:
-            return pipeline_workdir
-
-        candidate = Path(cwd).expanduser()
-        if candidate.is_absolute():
-            return candidate
-        return (pipeline_workdir / candidate).resolve()
-
     def _build_paths(self, pipeline: PipelineSpec, run_id: str, node_id: str, node_target: Any) -> ExecutionPaths:
-        pipeline_workdir = pipeline.working_path
-        host_runtime_dir = ensure_dir(self.store.base_dir / run_id / "runtime" / node_id)
-        app_root = Path(__file__).resolve().parents[1]
-        if node_target.kind == "container":
-            host_workdir = pipeline_workdir
-            target_workdir = node_target.workdir_mount
-            target_runtime_dir = node_target.runtime_mount
-        elif node_target.kind == "aws_lambda":
-            host_workdir = pipeline_workdir
-            target_workdir = node_target.remote_workdir
-            target_runtime_dir = f"{node_target.remote_workdir.rstrip('/')}/.agentflow-runtime/{node_id}"
-        else:
-            host_workdir = self._resolve_local_workdir(pipeline_workdir, node_target.cwd)
-            target_workdir = str(host_workdir)
-            target_runtime_dir = str(host_runtime_dir)
-        return ExecutionPaths(
-            host_workdir=host_workdir,
-            host_runtime_dir=host_runtime_dir,
-            target_workdir=target_workdir,
-            target_runtime_dir=target_runtime_dir,
-            app_root=app_root,
+        return build_execution_paths(
+            base_dir=self.store.base_dir,
+            pipeline_workdir=pipeline.working_path,
+            run_id=run_id,
+            node_id=node_id,
+            node_target=node_target,
         )
 
     async def _publish(self, run_id: str, event_type: str, *, node_id: str | None = None, **data: Any) -> None:
