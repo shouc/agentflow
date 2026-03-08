@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from typing import Any
 
@@ -26,6 +27,9 @@ _BASH_UNSUPPORTED_LONG_FLAG_DETAILS = {
     "--command": "Bash does not support `--command`; use `-c` or omit it and let AgentFlow add `-c`.",
     "--interactive": "Bash does not support `--interactive`; use `-i` or set `target.shell_interactive: true`.",
 }
+_COMMAND_POSITION_PREFIX_TOKENS = {"builtin", "command", "env", "nohup", "sudo", "time"}
+_ENV_ASSIGNMENT_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_SHELL_CONTROL_TOKENS = {"&&", "||", "|", ";", "do", "then", "elif"}
 
 
 def _target_value(target: Any, key: str) -> Any:
@@ -45,6 +49,17 @@ def _split_shell_parts(command: str | None) -> list[str]:
 
 def _is_command_flag(part: str) -> bool:
     return part == "--command" or (part.startswith("-") and not part.startswith("--") and "c" in part[1:])
+
+
+def _looks_like_env_assignment(token: str) -> bool:
+    return bool(_ENV_ASSIGNMENT_PATTERN.match(token))
+
+
+def _token_resets_command_position(token: str) -> bool:
+    stripped = token.strip()
+    if stripped in _SHELL_CONTROL_TOKENS:
+        return True
+    return stripped.endswith((";", "&&", "||", "|"))
 
 
 def shell_init_commands(shell_init: Any) -> tuple[str, ...]:
@@ -175,11 +190,27 @@ def shell_command_uses_kimi_helper(command: str | None) -> bool:
         return False
 
     tokens = _split_shell_parts(command)
+    expects_command = True
+    prefix_allows_options = False
     for index, token in enumerate(tokens):
         if _looks_like_kimi_token(token) and not _is_kimi_probe_argument(tokens, index):
-            return True
+            if expects_command:
+                return True
         if index > 0 and _is_command_flag(tokens[index - 1]) and shell_command_uses_kimi_helper(token):
             return True
+        if expects_command:
+            if token in _COMMAND_POSITION_PREFIX_TOKENS:
+                prefix_allows_options = True
+                continue
+            if _looks_like_env_assignment(token):
+                continue
+            if prefix_allows_options and (token == "--" or token.startswith("-")):
+                continue
+            expects_command = False
+            prefix_allows_options = False
+        if _token_resets_command_position(token):
+            expects_command = True
+            prefix_allows_options = False
     return False
 
 
