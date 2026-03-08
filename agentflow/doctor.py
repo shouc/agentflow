@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -64,11 +65,15 @@ def _check_bash_login_startup(home: Path) -> DoctorCheck:
     )
 
 
-def _check_kimi_shell_helper() -> DoctorCheck:
+def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
+    env = os.environ.copy()
+    if home is not None:
+        env["HOME"] = str(home)
     result = subprocess.run(
         ["bash", "-lic", f"type {shlex.quote('kimi')}"] ,
         check=False,
         capture_output=True,
+        env=env,
         text=True,
     )
     if result.returncode == 0:
@@ -85,11 +90,12 @@ def _check_kimi_shell_helper() -> DoctorCheck:
 
 
 def build_local_smoke_doctor_report(home: Path | None = None) -> DoctorReport:
+    resolved_home = home or Path.home()
     checks = [
         _check_executable("codex"),
         _check_executable("claude"),
-        _check_bash_login_startup(home or Path.home()),
-        _check_kimi_shell_helper(),
+        _check_bash_login_startup(resolved_home),
+        _check_kimi_shell_helper(resolved_home),
     ]
     if any(check.status == "failed" for check in checks):
         status = "failed"
