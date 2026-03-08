@@ -114,6 +114,15 @@ def _home_relative_shell_path(home: Path, path: Path) -> str:
     return path.resolve().relative_to(home.resolve()).as_posix()
 
 
+def _shell_startup_read_error(home: Path, path: Path, exc: OSError) -> _ShellStartupReadError:
+    try:
+        display_path = f"~/{_home_relative_shell_path(home, path)}"
+    except ValueError:
+        display_path = str(path)
+    detail = (exc.strerror or str(exc)).strip()
+    return _ShellStartupReadError(display_path, detail)
+
+
 def _is_bash_interactive_stderr_noise(line: str) -> bool:
     return any(line.startswith(prefix) for prefix in _BASH_INTERACTIVE_STDERR_NOISE)
 
@@ -142,6 +151,13 @@ def _format_shell_diagnostic(stderr: str) -> str:
             continue
         sanitized_lines.append(_redact_sensitive_diagnostic_line(line))
     return "\n".join(sanitized_lines).strip()
+
+
+class _ShellStartupReadError(RuntimeError):
+    def __init__(self, path: str, detail: str):
+        super().__init__(detail)
+        self.path = path
+        self.detail = detail
 
 
 @dataclass(frozen=True)
@@ -260,7 +276,10 @@ def _bash_startup_chain_to_bashrc(
 
     resolved_home = home.resolve()
     bashrc_path = (resolved_home / ".bashrc").resolve()
-    text = startup_file.read_text(encoding="utf-8", errors="ignore")
+    try:
+        text = startup_file.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        raise _shell_startup_read_error(home, startup_file, exc) from exc
     targets = tuple(
         resolved
         for token in _iter_shell_source_targets(text)
@@ -324,6 +343,13 @@ def _bash_login_file_clause(home: Path, login_file: Path) -> str:
     return "Bash login shells use `~/.profile`"
 
 
+def _bash_startup_read_error_detail(home: Path, login_file: Path, exc: _ShellStartupReadError) -> str:
+    return (
+        f"{_bash_login_file_clause(home, login_file)}, but AgentFlow could not read `{exc.path}` while checking "
+        f"whether login shells reach `~/.bashrc`: {exc.detail}."
+    )
+
+
 def _check_bash_login_startup(home: Path) -> DoctorCheck:
     login_file = _bash_login_file(home)
     if login_file is None:
@@ -336,10 +362,24 @@ def _check_bash_login_startup(home: Path) -> DoctorCheck:
             ),
         )
 
-    chain = _bash_startup_chain_to_bashrc(home, login_file)
+    try:
+        chain = _bash_startup_chain_to_bashrc(home, login_file)
+    except _ShellStartupReadError as exc:
+        return DoctorCheck(
+            name="bash_login_startup",
+            status="warning",
+            detail=_bash_startup_read_error_detail(home, login_file, exc),
+        )
     login_file_clause = _bash_login_file_clause(home, login_file)
     if chain is None:
-        shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(home, login_file.name)
+        try:
+            shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(home, login_file.name)
+        except _ShellStartupReadError as exc:
+            return DoctorCheck(
+                name="bash_login_startup",
+                status="warning",
+                detail=_bash_startup_read_error_detail(home, login_file, exc),
+            )
         if shadowed_chain is not None:
             shadowed_paths = _format_bash_startup_paths(shadowed_chain[:-1])
             pronoun = "it" if len(shadowed_chain) == 2 else "they"
@@ -401,12 +441,28 @@ def build_bash_login_shell_bridge_recommendation(home: Path | None = None) -> Sh
             ),
         )
 
-    chain = _bash_startup_chain_to_bashrc(resolved_home, login_file)
+    try:
+        chain = _bash_startup_chain_to_bashrc(resolved_home, login_file)
+    except _ShellStartupReadError as exc:
+        return ShellBridgeRecommendation(
+            target=f"~/{login_file.name}",
+            source="~/.bashrc",
+            snippet=_render_shell_source_snippet(".bashrc"),
+            reason=f"{_bash_startup_read_error_detail(resolved_home, login_file, exc)} Add a direct bridge to the active login file.",
+        )
     if chain is not None:
         return None
 
     login_file_clause = _bash_login_file_clause(resolved_home, login_file)
-    shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(resolved_home, login_file.name)
+    try:
+        shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(resolved_home, login_file.name)
+    except _ShellStartupReadError as exc:
+        return ShellBridgeRecommendation(
+            target=f"~/{login_file.name}",
+            source="~/.bashrc",
+            snippet=_render_shell_source_snippet(".bashrc"),
+            reason=f"{_bash_startup_read_error_detail(resolved_home, login_file, exc)} Add a direct bridge to the active login file.",
+        )
     if shadowed_chain is not None:
         shadowed_paths = _format_bash_startup_paths(shadowed_chain[:-1])
         pronoun = "it" if len(shadowed_chain) == 2 else "they"
