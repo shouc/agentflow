@@ -287,6 +287,60 @@ nodes:
     ]
 
 
+def test_inspect_command_redacts_inline_shell_bootstrap_secrets(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-secret-shell-init
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: kimi
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      shell_interactive: true
+      shell_init:
+        - export ANTHROPIC_API_KEY=super-secret-inline
+        - kimi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
+
+    json_result = runner.invoke(app, ["inspect", str(pipeline_path), "--node", "review", "--output", "json"])
+
+    assert json_result.exit_code == 0
+    payload = json.loads(json_result.stdout)
+    assert payload["nodes"][0]["target"]["shell_init"] == [
+        "export ANTHROPIC_API_KEY=<redacted>",
+        "kimi",
+    ]
+    assert payload["nodes"][0]["launch"]["command"] == [
+        "bash",
+        "-l",
+        "-i",
+        "-c",
+        'export ANTHROPIC_API_KEY=<redacted> && kimi && eval "$AGENTFLOW_TARGET_COMMAND"',
+    ]
+    assert payload["nodes"][0]["launch"]["command_text"] == (
+        "bash -l -i -c 'export ANTHROPIC_API_KEY=<redacted> && kimi && eval \"$AGENTFLOW_TARGET_COMMAND\"'"
+    )
+
+    summary_result = runner.invoke(app, ["inspect", str(pipeline_path), "--node", "review", "--output", "json-summary"])
+
+    assert summary_result.exit_code == 0
+    summary_payload = json.loads(summary_result.stdout)
+    assert summary_payload["nodes"][0]["bootstrap"] == (
+        "shell=bash, login=true, interactive=true, init=export ANTHROPIC_API_KEY=<redacted> && kimi"
+    )
+    assert summary_payload["nodes"][0]["launch"] == (
+        "bash -l -i -c 'export ANTHROPIC_API_KEY=<redacted> && kimi && eval \"$AGENTFLOW_TARGET_COMMAND\"'"
+    )
+
+
 def test_inspect_command_reports_disabled_auto_preflight_for_plain_pipeline(tmp_path):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
@@ -2129,6 +2183,8 @@ def test_doctor_with_pipeline_path_augments_report_for_kimi_shell_bootstrap_warn
         "Doctor: warning\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_shell_bootstrap: warning - Node `claude_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
 
 
@@ -2155,6 +2211,8 @@ def test_doctor_with_pipeline_path_augments_report_for_kimi_agent_bootstrap_warn
         "Doctor: warning\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_shell_bootstrap: warning - Node `kimi_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: kimi_review (kimi) via `target.shell_init`\n"
     )
 
 
@@ -2172,6 +2230,53 @@ def test_doctor_with_pipeline_path_supports_json_output(monkeypatch):
     assert json.loads(result.stdout) == {
         "status": "ok",
         "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": False,
+                "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
+    }
+
+
+def test_doctor_with_pipeline_path_reports_auto_preflight_metadata_in_json(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="review",
+                agent=SimpleNamespace(value="claude"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=True),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "json"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert json.loads(result.stdout) == {
+        "status": "ok",
+        "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+                "matches": [
+                    {
+                        "node_id": "review",
+                        "agent": "claude",
+                        "trigger": "target.shell_init",
+                    }
+                ],
+                "match_summary": ["review (claude) via `target.shell_init`"],
+            }
+        },
     }
 
 
