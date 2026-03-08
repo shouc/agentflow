@@ -44,10 +44,31 @@ def _strip_shell_comments(line: str) -> str:
 
 
 def _shell_sources_file(text: str, filename: str) -> bool:
-    pattern = re.compile(
-        rf'(^|[\s;()])(?:source|\.)\s+["\']?(?:(?:\$HOME|\$\{{HOME\}}|~)/)?{re.escape(filename)}["\']?(?=$|[\s;()])'
-    )
-    return any(pattern.search(_strip_shell_comments(line)) for line in text.splitlines())
+    for raw_line in text.splitlines():
+        line = _strip_shell_comments(raw_line).strip()
+        if not line:
+            continue
+        try:
+            tokens = shlex.split(line, posix=True)
+        except ValueError:
+            tokens = line.split()
+        for index, token in enumerate(tokens[:-1]):
+            if token not in {"source", "."}:
+                continue
+            if _shell_source_target_matches(tokens[index + 1], filename):
+                return True
+    return False
+
+
+def _shell_source_target_matches(token: str, filename: str) -> bool:
+    normalized = token.rstrip(";)")
+    accepted_targets = {
+        filename,
+        f"~/{filename}",
+        f"$HOME/{filename}",
+        f"${{HOME}}/{filename}",
+    }
+    return normalized in accepted_targets
 
 
 @dataclass(frozen=True)
