@@ -158,36 +158,102 @@ def _node_preview(node: object) -> str | None:
     return None
 
 
-def _render_run_summary(record: object, run_dir: Path | str | None = None) -> str:
-    lines = [f"Run {record.id}: {_status_value(record.status)}"]
+def _build_run_summary(record: object, run_dir: Path | str | None = None) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "id": record.id,
+        "status": _status_value(record.status),
+        "nodes": [],
+    }
     pipeline_name = getattr(getattr(record, "pipeline", None), "name", None)
     if pipeline_name:
-        lines.append(f"Pipeline: {pipeline_name}")
-    duration = _format_duration(getattr(record, "started_at", None), getattr(record, "finished_at", None))
+        summary["pipeline"] = {"name": pipeline_name}
+    started_at = getattr(record, "started_at", None)
+    if started_at:
+        summary["started_at"] = started_at
+    finished_at = getattr(record, "finished_at", None)
+    if finished_at:
+        summary["finished_at"] = finished_at
+    duration = _format_duration(started_at, finished_at)
+    if duration is not None:
+        summary["duration"] = duration
+    if run_dir is not None:
+        summary["run_dir"] = str(run_dir)
+
+    nodes: list[dict[str, object]] = []
+    pipeline_nodes = _pipeline_node_map(record)
+    for node_id, node in (getattr(record, "nodes", {}) or {}).items():
+        pipeline_node = pipeline_nodes.get(node_id)
+        node_summary: dict[str, object] = {
+            "id": node_id,
+            "status": _status_value(getattr(node, "status", "unknown")),
+        }
+        if pipeline_node is not None:
+            agent = getattr(pipeline_node, "agent", None)
+            if agent is not None:
+                node_summary["agent"] = _status_value(agent)
+            model = getattr(pipeline_node, "model", None)
+            if model:
+                node_summary["model"] = model
+            provider = _provider_name(getattr(pipeline_node, "provider", None))
+            if provider:
+                node_summary["provider"] = provider
+        attempts = _node_attempt_count(node)
+        if attempts:
+            node_summary["attempts"] = attempts
+        exit_code = getattr(node, "exit_code", None)
+        if exit_code is not None:
+            node_summary["exit_code"] = exit_code
+        preview = _node_preview(node)
+        if preview is not None:
+            node_summary["preview"] = preview
+        nodes.append(node_summary)
+
+    summary["nodes"] = nodes
+    return summary
+
+
+def _render_run_summary(record: object, run_dir: Path | str | None = None) -> str:
+    summary = _build_run_summary(record, run_dir=run_dir)
+    lines = [f"Run {summary['id']}: {summary['status']}"]
+    pipeline = summary.get("pipeline")
+    if isinstance(pipeline, dict) and pipeline.get("name"):
+        lines.append(f"Pipeline: {pipeline['name']}")
+    duration = summary.get("duration")
     if duration is not None:
         lines.append(f"Duration: {duration}")
-    if run_dir is not None:
-        lines.append(f"Run dir: {run_dir}")
-    nodes = getattr(record, "nodes", {}) or {}
-    pipeline_nodes = _pipeline_node_map(record)
-    if nodes:
+    run_dir_value = summary.get("run_dir")
+    if run_dir_value is not None:
+        lines.append(f"Run dir: {run_dir_value}")
+    nodes = summary.get("nodes")
+    if isinstance(nodes, list) and nodes:
         lines.append("Nodes:")
-        for node_id, node in nodes.items():
-            identity = _node_identity(node_id, pipeline_nodes.get(node_id))
-            summary = f"{identity}: {_status_value(getattr(node, 'status', 'unknown'))}"
+        for node in nodes:
+            node_id = str(node["id"])
+            parts: list[str] = []
+            agent = node.get("agent")
+            if agent is not None:
+                parts.append(str(agent))
+            model = node.get("model")
+            if model:
+                parts.append(f"model={model}")
+            provider = node.get("provider")
+            if provider:
+                parts.append(f"provider={provider}")
+            identity = node_id if not parts else f"{node_id} [{', '.join(parts)}]"
+            rendered = f"{identity}: {node['status']}"
             metadata: list[str] = []
-            attempts = _node_attempt_count(node)
+            attempts = node.get("attempts")
             if attempts:
                 metadata.append(f"attempt {attempts}")
-            exit_code = getattr(node, "exit_code", None)
+            exit_code = node.get("exit_code")
             if exit_code is not None:
                 metadata.append(f"exit {exit_code}")
             if metadata:
-                summary += f" ({', '.join(metadata)})"
-            preview = _node_preview(node)
+                rendered += f" ({', '.join(metadata)})"
+            preview = node.get("preview")
             if preview is not None:
-                summary += f" - {preview}"
-            lines.append(f"- {summary}")
+                rendered += f" - {preview}"
+            lines.append(f"- {rendered}")
     return "\n".join(lines)
 
 
