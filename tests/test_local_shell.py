@@ -142,6 +142,23 @@ def test_kimi_shell_init_requires_interactive_bash_warning_accepts_bash_env_boot
     assert kimi_shell_init_requires_interactive_bash_warning(target) is None
 
 
+def test_kimi_shell_init_requires_interactive_bash_warning_accepts_bash_env_that_sources_helper_file(
+    tmp_path: Path,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".agentflow-kimi").write_text("kimi(){ :; }\n", encoding="utf-8")
+    shell_env = home / "shell.env"
+    shell_env.write_text('source "$HOME/.agentflow-kimi"\n', encoding="utf-8")
+    target = {
+        "kind": "local",
+        "shell": f"env BASH_ENV={shell_env} bash -c",
+        "shell_init": "kimi",
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target, home=home) is None
+
+
 def test_kimi_shell_init_requires_interactive_bash_warning_rejects_bash_env_guarded_like_bashrc(tmp_path: Path):
     shell_env = tmp_path / "shell.env"
     shell_env.write_text(

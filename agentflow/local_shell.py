@@ -469,12 +469,13 @@ def _shell_command_loads_kimi_from_bash_env(command: str | None, *, home: Path |
     bash_env = _shell_command_prefix_env_value_for_target(command, "BASH_ENV", "bash")
     if not bash_env:
         return False
-    text = _read_shell_file_text(_resolve_shell_path(bash_env, home=home))
+    path = _resolve_shell_path(bash_env, home=home)
+    text = _read_shell_file_text(path)
     if text is None:
         return False
     if _shell_text_returns_early_for_noninteractive_bash(text):
         return False
-    return _shell_text_defines_function(text, "kimi")
+    return _shell_file_loads_function(path, "kimi", home=home)
 
 
 def _shell_command_loads_function_from_sourced_file_before_target(
