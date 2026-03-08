@@ -66,9 +66,18 @@ def test_pipeline_validation_rejects_local_shell_bootstrap_without_shell(target_
     ("shell", "expected_message"),
     [
         ("bash --command 'kimi && {command}'", r"unsupported bash long option.*--command.*use `-c`"),
+        ("bash --command='kimi && {command}'", r"unsupported bash long option.*--command.*use `-c`"),
         (
             "env BASH_ENV=/tmp/kimi.env bash --interactive -c 'kimi && {command}'",
             r"unsupported bash long option.*--interactive.*target\.shell_interactive",
+        ),
+        (
+            "bash --rcfile=\"$HOME/.bashrc\" -ic 'kimi && {command}'",
+            r"unsupported bash long option.*--rcfile=.*pass `--rcfile` and its value as separate arguments",
+        ),
+        (
+            "bash --login=1 -c 'kimi && {command}'",
+            r"unsupported bash long option.*--login=.*use `--login` without `=`",
         ),
     ],
 )
@@ -88,6 +97,29 @@ def test_pipeline_validation_rejects_unsupported_bash_long_options(shell, expect
                 ],
             }
         )
+
+
+def test_pipeline_validation_accepts_supported_bash_long_options_with_separate_value():
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "valid-bash-long-options",
+            "working_dir": ".",
+            "nodes": [
+                {
+                    "id": "plan",
+                    "agent": "claude",
+                    "prompt": "plan",
+                    "target": {
+                        "kind": "local",
+                        "shell": "bash --rcfile $HOME/.bashrc -ic 'kimi && {command}'",
+                        "shell_init": "kimi",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert pipeline.nodes[0].target.shell == "bash --rcfile $HOME/.bashrc -ic 'kimi && {command}'"
 
 
 @pytest.mark.parametrize(

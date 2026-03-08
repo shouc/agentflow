@@ -65,6 +65,17 @@ def invalid_bash_long_option_error(command: str | None) -> str | None:
             arg = tokens[position]
             if arg == "--":
                 return None
+            if arg.startswith("--") and "=" in arg:
+                option_name, _ = arg.split("=", 1)
+                if option_name in _BASH_UNSUPPORTED_LONG_FLAG_DETAILS:
+                    return _BASH_UNSUPPORTED_LONG_FLAG_DETAILS[option_name]
+                if option_name in _BASH_LONG_FLAGS_WITH_VALUE:
+                    return (
+                        f"Bash does not support `{option_name}=...`; "
+                        f"pass `{option_name}` and its value as separate arguments."
+                    )
+                if option_name in _BASH_SUPPORTED_LONG_FLAGS:
+                    return f"Bash does not support `{option_name}=...`; use `{option_name}` without `=`."
             if arg in _BASH_UNSUPPORTED_LONG_FLAG_DETAILS:
                 return _BASH_UNSUPPORTED_LONG_FLAG_DETAILS[arg]
             if arg in _BASH_LONG_FLAGS_WITH_VALUE:
