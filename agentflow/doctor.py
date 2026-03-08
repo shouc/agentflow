@@ -19,7 +19,7 @@ from agentflow.local_shell import (
 )
 from agentflow.prepared import PreparedExecution, build_execution_paths
 from agentflow.runners.local import LocalRunner
-from agentflow.specs import AgentKind, LocalTarget, resolve_provider
+from agentflow.specs import AgentKind, LocalTarget, provider_uses_kimi_anthropic_auth, resolve_provider
 from agentflow.utils import looks_sensitive_key
 
 
@@ -321,7 +321,7 @@ def _should_probe_local_claude(node: object) -> bool:
         return False
 
     provider = resolve_provider(_object_value(node, "provider"), AgentKind.CLAUDE)
-    if provider is not None and provider.name == "kimi":
+    if provider_uses_kimi_anthropic_auth(provider):
         return True
 
     if shell_init_uses_kimi_helper(_object_value(target, "shell_init")):
