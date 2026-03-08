@@ -10,6 +10,7 @@ from pathlib import Path
 
 _BASH_LOGIN_FILENAMES = (".bash_profile", ".bash_login", ".profile")
 _KIMI_HELPER_MISSING_EXIT_CODE = 11
+_CLAUDE_IN_SHELL_MISSING_EXIT_CODE = 12
 _KIMI_API_KEY_MISSING_EXIT_CODE = 13
 
 
@@ -125,6 +126,7 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
             f"type {shlex.quote('kimi')} >/dev/null 2>&1 || exit {_KIMI_HELPER_MISSING_EXIT_CODE}",
             "kimi >/dev/null || exit $?",
             f'[ -n "${{ANTHROPIC_API_KEY:-}}" ] || exit {_KIMI_API_KEY_MISSING_EXIT_CODE}',
+            f"type {shlex.quote('claude')} >/dev/null 2>&1 || exit {_CLAUDE_IN_SHELL_MISSING_EXIT_CODE}",
         ]
     )
     try:
@@ -139,19 +141,31 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
         return DoctorCheck(
             name="kimi_shell_helper",
             status="failed",
-            detail=f"Could not launch `bash -lic` to verify `kimi`: {exc}",
+            detail=f"Could not launch `bash -lic` to verify `kimi` and `claude`: {exc}",
         )
     if result.returncode == 0:
         return DoctorCheck(
             name="kimi_shell_helper",
             status="ok",
-            detail="`kimi` is available in `bash -lic` and exports `ANTHROPIC_API_KEY` for the bundled smoke pipeline.",
+            detail=(
+                "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
+                "and keeps `claude` available for the bundled smoke pipeline."
+            ),
         )
     if result.returncode == _KIMI_HELPER_MISSING_EXIT_CODE:
         return DoctorCheck(
             name="kimi_shell_helper",
             status="failed",
             detail="`kimi` is unavailable in `bash -lic`; add it to your bash startup files before running the bundled smoke pipeline.",
+        )
+    if result.returncode == _CLAUDE_IN_SHELL_MISSING_EXIT_CODE:
+        return DoctorCheck(
+            name="kimi_shell_helper",
+            status="failed",
+            detail=(
+                "`kimi` runs in `bash -lic`, but `claude` is unavailable afterwards; "
+                "the bundled smoke pipeline will not be able to launch Claude-on-Kimi."
+            ),
         )
     if result.returncode == _KIMI_API_KEY_MISSING_EXIT_CODE:
         return DoctorCheck(
