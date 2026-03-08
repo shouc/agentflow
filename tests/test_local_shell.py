@@ -172,10 +172,30 @@ def test_shell_init_exports_env_var_ignores_non_exported_assignment():
     assert shell_init_exports_env_var(["ANTHROPIC_API_KEY=test-shell-key"], "ANTHROPIC_API_KEY") is False
 
 
+def test_shell_init_exports_env_var_detects_split_assignment_then_export():
+    assert (
+        shell_init_exports_env_var(
+            ["ANTHROPIC_API_KEY=test-shell-key", "export ANTHROPIC_API_KEY"],
+            "ANTHROPIC_API_KEY",
+        )
+        is True
+    )
+
+
 def test_shell_template_exports_env_var_before_command_detects_nested_export():
     assert (
         shell_template_exports_env_var_before_command(
             "bash -lc 'export ANTHROPIC_API_KEY=test-shell-key && {command}'",
+            "ANTHROPIC_API_KEY",
+        )
+        is True
+    )
+
+
+def test_shell_template_exports_env_var_before_command_detects_split_assignment_then_export():
+    assert (
+        shell_template_exports_env_var_before_command(
+            "bash -lc 'ANTHROPIC_API_KEY=test-shell-key && export ANTHROPIC_API_KEY && {command}'",
             "ANTHROPIC_API_KEY",
         )
         is True

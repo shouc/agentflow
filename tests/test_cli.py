@@ -2388,6 +2388,40 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_shell_init_
     )
 
 
+def test_doctor_with_pipeline_path_accepts_provider_credentials_from_split_shell_init_export(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="anthropic",
+                env={},
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_init=["ANTHROPIC_API_KEY=test-shell-key", "export ANTHROPIC_API_KEY"],
+                    shell_interactive=True,
+                ),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
 def test_doctor_with_pipeline_path_accepts_provider_credentials_from_shell_wrapper_export(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -2403,6 +2437,38 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_shell_wrapp
                 target=SimpleNamespace(
                     kind="local",
                     shell="bash -lc 'export ANTHROPIC_API_KEY=test-shell-key && {command}'",
+                ),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_accepts_provider_credentials_from_split_shell_wrapper_export(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="anthropic",
+                env={},
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash -lc 'ANTHROPIC_API_KEY=test-shell-key && export ANTHROPIC_API_KEY && {command}'",
                 ),
             )
         ]
