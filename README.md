@@ -156,7 +156,7 @@ target:
   shell_init: kimi
 ```
 
-This runs the node inside `bash`, explicitly enables login and interactive startup files, executes `kimi`, and then launches the prepared agent command. It is useful for helper functions defined in `~/.bashrc`. If your login shell uses `~/.bash_profile`, make sure it eventually reaches `~/.bashrc`, either directly or via another startup file such as `~/.profile`; otherwise Bash only reads `~/.profile` when no `~/.bash_profile` or `~/.bash_login` file is present.
+This runs the node inside `bash`, explicitly enables login and interactive startup files, executes `kimi`, and then launches the prepared agent command. It is useful for helper functions defined in `~/.bashrc`. Validation rejects `shell_login`, `shell_interactive`, or `shell_init` unless `target.shell` is also set, so these bootstrap fields cannot silently no-op. If your login shell uses `~/.bash_profile`, make sure it eventually reaches `~/.bashrc`, either directly or via another startup file such as `~/.profile`; otherwise Bash only reads `~/.profile` when no `~/.bash_profile` or `~/.bash_login` file is present.
 
 `shell_init` is treated as a bootstrap prerequisite: if it exits non-zero, AgentFlow does not launch the wrapped agent command. This helps smoke runs fail fast when helper functions such as `kimi` are missing.
 
