@@ -47,7 +47,7 @@ class LocalRunner(Runner):
         command_text = shlex.join(prepared.command)
         shell_command = 'eval "$AGENTFLOW_TARGET_COMMAND"'
         if target.shell_init:
-            shell_command = f"{target.shell_init}; {shell_command}"
+            shell_command = f"{target.shell_init} && {shell_command}"
 
         if "{command}" in target.shell:
             shell_parts = shlex.split(target.shell.replace("{command}", shell_command))

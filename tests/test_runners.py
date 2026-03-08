@@ -124,6 +124,34 @@ async def test_local_runner_shell_init_runs_in_login_interactive_shell(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_local_runner_shell_init_failure_stops_wrapped_command(tmp_path: Path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "gamma-fail",
+            "agent": "claude",
+            "prompt": "hi",
+            "target": {
+                "kind": "local",
+                "shell": "bash",
+                "shell_init": "missing_helper",
+            },
+        }
+    )
+    prepared = PreparedExecution(
+        command=["python3", "-c", 'print("wrapped command should not run", end="")'],
+        env={},
+        cwd=str(tmp_path),
+        trace_kind="claude",
+    )
+
+    result = await LocalRunner().execute(node, prepared, _paths(tmp_path), _noop_output, lambda: False)
+
+    assert result.exit_code != 0
+    assert result.stdout_lines == []
+    assert result.stderr_lines == ["bash: line 1: missing_helper: command not found"]
+
+
+@pytest.mark.asyncio
 async def test_local_runner_plain_shell_does_not_enable_login_mode(tmp_path: Path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
