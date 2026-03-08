@@ -412,6 +412,29 @@ nodes:
     ]
 
 
+def test_inspect_command_warns_when_explicit_kimi_shell_wrapper_is_not_interactive(tmp_path):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-kimi-wrapper-warning
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: "bash -lc 'kimi && {command}'"
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path)])
+
+    assert result.exit_code == 0
+    assert "Warning: `target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually unavailable." in result.stdout
+    assert "Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`." in result.stdout
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -465,6 +488,61 @@ nodes:
             "name": "kimi_shell_bootstrap",
             "status": "warning",
             "detail": "Node `review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.",
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["run"],
+        ["smoke"],
+    ],
+)
+def test_run_and_smoke_preflight_warn_when_explicit_kimi_shell_wrapper_is_not_interactive(tmp_path, monkeypatch, command):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: kimi-wrapper-preflight-warning
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: "bash -lc 'kimi && {command}'"
+""",
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="ok",
+            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
+        ),
+    )
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_run_pipeline",
+        lambda pipeline, runs_dir, max_concurrent_runs, output: captured.setdefault("pipeline", pipeline.name),
+    )
+
+    result = runner.invoke(app, [*command, str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 0
+    assert captured == {"pipeline": "kimi-wrapper-preflight-warning"}
+    payload = json.loads(result.stderr)
+    assert payload["status"] == "warning"
+    assert payload["checks"] == [
+        {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        {
+            "name": "kimi_shell_bootstrap",
+            "status": "warning",
+            "detail": "Node `review`: `target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`.",
         },
     ]
 

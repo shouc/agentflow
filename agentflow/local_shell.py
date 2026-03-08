@@ -81,6 +81,18 @@ def shell_command_uses_kimi_helper(command: str | None) -> bool:
     return False
 
 
+def _kimi_bootstrap_without_interactive_bash_warning(source: str) -> str:
+    if source == "target.shell_init":
+        return (
+            "`shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually "
+            "unavailable. Set `target.shell_interactive: true` or use `bash -lic`."
+        )
+    return (
+        "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually "
+        "unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    )
+
+
 def kimi_shell_init_requires_interactive_bash_warning(target: Any) -> str | None:
     if not target_uses_bash(target):
         return None
@@ -88,10 +100,11 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any) -> str | None
         return None
 
     shell_init = _target_value(target, "shell_init")
-    if not shell_command_uses_kimi_helper(shell_init if isinstance(shell_init, str) else None):
-        return None
+    if shell_command_uses_kimi_helper(shell_init if isinstance(shell_init, str) else None):
+        return _kimi_bootstrap_without_interactive_bash_warning("target.shell_init")
 
-    return (
-        "`shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually "
-        "unavailable. Set `target.shell_interactive: true` or use `bash -lic`."
-    )
+    shell = _target_value(target, "shell")
+    if shell_command_uses_kimi_helper(shell if isinstance(shell, str) else None):
+        return _kimi_bootstrap_without_interactive_bash_warning("target.shell")
+
+    return None
