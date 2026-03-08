@@ -322,8 +322,20 @@ def shell_command_prefixes_env_var(command: str | None, env_var: str) -> bool:
     return False
 
 
+def _resolved_home_path(home: Path | None) -> Path:
+    return (home or Path.home()).expanduser()
+
+
+def _shell_command_effective_home_for_target(command: str | None, target: str, *, home: Path | None = None) -> Path:
+    resolved_home = _resolved_home_path(home)
+    home_value = _shell_command_prefix_env_value_for_target(command, "HOME", target)
+    if not home_value:
+        return resolved_home
+    return _resolve_shell_path(home_value, home=resolved_home)
+
+
 def _resolve_shell_path(path: str, *, home: Path | None = None) -> Path:
-    resolved_home = (home or Path.home()).expanduser()
+    resolved_home = _resolved_home_path(home)
     normalized = path.strip()
     if normalized == "~":
         expanded = str(resolved_home)
@@ -455,7 +467,7 @@ def _shell_file_loads_function(
     if _shell_text_defines_function(text, function_name):
         return True
 
-    resolved_home = (home or Path.home()).expanduser()
+    resolved_home = _resolved_home_path(home)
     for token in _iter_shell_source_targets(text):
         target = _resolve_home_shell_source_target(token, resolved_home)
         if target is None:
@@ -466,16 +478,17 @@ def _shell_file_loads_function(
 
 
 def _shell_command_loads_kimi_from_bash_env(command: str | None, *, home: Path | None = None) -> bool:
+    resolved_home = _shell_command_effective_home_for_target(command, "bash", home=home)
     bash_env = _shell_command_prefix_env_value_for_target(command, "BASH_ENV", "bash")
     if not bash_env:
         return False
-    path = _resolve_shell_path(bash_env, home=home)
+    path = _resolve_shell_path(bash_env, home=resolved_home)
     text = _read_shell_file_text(path)
     if text is None:
         return False
     if _shell_text_returns_early_for_noninteractive_bash(text):
         return False
-    return _shell_file_loads_function(path, "kimi", home=home)
+    return _shell_file_loads_function(path, "kimi", home=resolved_home)
 
 
 def _shell_command_loads_function_from_sourced_file_before_target(
@@ -506,7 +519,11 @@ def _shell_command_loads_function_from_sourced_file_before_target(
             token,
             function_name,
             target,
-            home=home,
+            home=(
+                _shell_command_effective_home_for_target(command, active_command, home=home)
+                if active_command is not None
+                else home
+            ),
         ):
             return True
 
@@ -704,7 +721,7 @@ def _explicit_bashrc_shell_init_warning(subject: str) -> str:
 
 
 def bashrc_returns_early_for_noninteractive_shell(home: Path | None = None) -> bool:
-    resolved_home = (home or Path.home()).expanduser()
+    resolved_home = _resolved_home_path(home)
     bashrc_path = resolved_home / ".bashrc"
     text = _read_shell_file_text(bashrc_path)
     if text is None:
@@ -955,13 +972,17 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path
 
     shell_init = _target_value(target, "shell_init")
     shell = _target_value(target, "shell")
+    effective_home = _shell_command_effective_home_for_target(shell if isinstance(shell, str) else None, "bash", home=home)
     if _shell_command_loads_kimi_from_bash_env(shell if isinstance(shell, str) else None, home=home):
         return None
-    guarded_bashrc = bashrc_returns_early_for_noninteractive_shell(home)
+    guarded_bashrc = bashrc_returns_early_for_noninteractive_shell(effective_home)
     if shell_init_uses_kimi_helper(shell_init):
-        if _shell_template_loads_kimi_from_sourced_file_before_command(shell if isinstance(shell, str) else None, home=home):
+        if _shell_template_loads_kimi_from_sourced_file_before_command(
+            shell if isinstance(shell, str) else None,
+            home=effective_home,
+        ):
             return None
-        if _shell_init_loads_kimi_from_sourced_file_before_kimi(shell_init, home=home):
+        if _shell_init_loads_kimi_from_sourced_file_before_kimi(shell_init, home=effective_home):
             return None
         if guarded_bashrc:
             if shell_template_sources_bashrc_before_command(shell if isinstance(shell, str) else None):
@@ -971,7 +992,7 @@ def kimi_shell_init_requires_interactive_bash_warning(target: Any, *, home: Path
         return _kimi_bootstrap_without_interactive_bash_warning("target.shell_init")
 
     if shell_command_uses_kimi_helper(shell if isinstance(shell, str) else None):
-        if _shell_command_loads_kimi_from_sourced_file_before_kimi(shell, home=home):
+        if _shell_command_loads_kimi_from_sourced_file_before_kimi(shell, home=effective_home):
             return None
         if guarded_bashrc and shell_command_sources_bashrc_before_kimi(shell):
             return _explicit_bashrc_kimi_warning("target.shell")
