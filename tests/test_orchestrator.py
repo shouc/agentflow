@@ -40,6 +40,13 @@ if node_id == "flaky":
         marker.write_text("first failure", encoding="utf-8")
         print("transient failure", file=sys.stderr)
         raise SystemExit(3)
+if node_id == "flaky_silent":
+    marker = workdir / ".flaky_silent"
+    if not marker.exists():
+        marker.write_text("first failure", encoding="utf-8")
+        print("stale stdout from failed attempt")
+        raise SystemExit(3)
+    raise SystemExit(0)
 if node_id == "writer":
     (workdir / "artifact.txt").write_text("file data", encoding="utf-8")
 if agent == "codex":
@@ -236,6 +243,39 @@ async def test_orchestrator_retries_failed_nodes(tmp_path: Path):
     assert node.attempts[0].status.value == "failed"
     assert node.attempts[1].status.value == "completed"
     assert orchestrator.store.read_artifact_text(completed.id, "flaky", "output.txt") == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_retry_isolates_final_capture_from_failed_attempt_stdout(tmp_path: Path):
+    orchestrator = make_orchestrator(tmp_path)
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "retry-silent-success",
+            "working_dir": str(tmp_path),
+            "nodes": [
+                {
+                    "id": "flaky_silent",
+                    "agent": "codex",
+                    "prompt": "unused",
+                    "retries": 1,
+                    "retry_backoff_seconds": 0.01,
+                }
+            ],
+        }
+    )
+
+    run = await orchestrator.submit(pipeline)
+    completed = await orchestrator.wait(run.id, timeout=5)
+    node = completed.nodes["flaky_silent"]
+
+    assert completed.status.value == "completed"
+    assert node.status.value == "completed"
+    assert node.final_response == ""
+    assert node.output == ""
+    assert node.stdout_lines == []
+    assert node.attempts[0].output == "stale stdout from failed attempt"
+    assert node.attempts[1].output == ""
+    assert orchestrator.store.read_artifact_text(completed.id, "flaky_silent", "output.txt") == ""
 
 
 @pytest.mark.asyncio
