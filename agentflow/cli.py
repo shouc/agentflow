@@ -17,6 +17,7 @@ from agentflow.doctor import (
     build_bash_login_shell_bridge_recommendation,
     build_pipeline_local_kimi_readiness_checks,
     build_pipeline_local_claude_readiness_checks,
+    build_pipeline_local_codex_readiness_checks,
     build_local_smoke_doctor_report,
     build_pipeline_local_codex_auth_checks,
 )
@@ -637,6 +638,7 @@ def _augment_preflight_report(report: object, pipeline: object) -> object:
         *_pipeline_provider_credential_checks(pipeline),
         *build_pipeline_local_kimi_readiness_checks(pipeline),
         *build_pipeline_local_claude_readiness_checks(pipeline),
+        *build_pipeline_local_codex_readiness_checks(pipeline),
         *build_pipeline_local_codex_auth_checks(pipeline),
         ],
     )

@@ -9,6 +9,8 @@ from agentflow.doctor import (
     _should_probe_local_claude,
     build_bash_login_shell_bridge_recommendation,
     build_local_smoke_doctor_report,
+    build_pipeline_local_codex_auth_checks,
+    build_pipeline_local_codex_readiness_checks,
 )
 from agentflow.specs import ProviderConfig
 
@@ -60,6 +62,43 @@ def test_should_probe_local_claude_for_custom_kimi_provider_env_base_url():
     )
 
     assert _should_probe_local_claude(node) is True
+
+
+def test_pipeline_local_codex_checks_use_custom_executable(monkeypatch):
+    pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="codex_plan",
+                agent=SimpleNamespace(value="codex"),
+                provider=None,
+                env={},
+                executable="custom-codex",
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            )
+        ],
+        working_path=Path.cwd(),
+    )
+    captured_target_commands: list[str] = []
+
+    def fake_run(*args, **kwargs):
+        env = kwargs.get("env") or {}
+        captured_target_commands.append(env.get("AGENTFLOW_TARGET_COMMAND", ""))
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("agentflow.doctor.subprocess.run", fake_run)
+
+    assert build_pipeline_local_codex_readiness_checks(pipeline) == []
+    assert build_pipeline_local_codex_auth_checks(pipeline) == []
+    assert "custom-codex --version" in captured_target_commands
+    assert "custom-codex login status" in captured_target_commands
 
 
 def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkeypatch):

@@ -2141,6 +2141,63 @@ def test_run_auto_preflight_stops_when_local_codex_auth_is_unavailable(monkeypat
 
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def fake_run(*args, **kwargs):
+        env = kwargs.get("env") or {}
+        target_command = env.get("AGENTFLOW_TARGET_COMMAND", "")
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0 if target_command == "codex --version" else 1,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("runtime should not build when preflight fails")),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="codex_plan",
+                agent=SimpleNamespace(value="codex"),
+                provider=None,
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            )
+        ],
+        working_path=Path.cwd(),
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["run", "custom-run.yaml", "--output", "summary"])
+
+    assert result.exit_code == 1
+    assert captured["loaded_path"] == "custom-run.yaml"
+    assert result.stdout == (
+        "Doctor: failed\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- codex_auth: failed - Node `codex_plan` (codex) cannot authenticate local Codex after the node shell bootstrap; `codex login status` fails and `OPENAI_API_KEY` is not set in the current environment, `node.env`, or `provider.env`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
+    )
+
+
+def test_run_auto_preflight_stops_when_local_codex_is_unavailable_after_shell_bootstrap(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -2180,7 +2237,7 @@ def test_run_auto_preflight_stops_when_local_codex_auth_is_unavailable(monkeypat
     assert result.stdout == (
         "Doctor: failed\n"
         "- kimi_shell_helper: ok - ready\n"
-        "- codex_auth: failed - Node `codex_plan` (codex) cannot authenticate local Codex after the node shell bootstrap; `codex login status` fails and `OPENAI_API_KEY` is not set in the current environment, `node.env`, or `provider.env`.\n"
+        "- codex_ready: failed - Node `codex_plan` (codex) cannot launch local Codex after the node shell bootstrap; `codex --version` fails in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
     )
@@ -3544,11 +3601,18 @@ def test_doctor_with_pipeline_path_fails_when_local_codex_auth_is_unavailable(mo
 
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=1, stdout="", stderr=""),
-    )
+
+    def fake_run(*args, **kwargs):
+        env = kwargs.get("env") or {}
+        target_command = env.get("AGENTFLOW_TARGET_COMMAND", "")
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0 if target_command == "codex --version" else 1,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
     fake_pipeline = SimpleNamespace(
         nodes=[
             SimpleNamespace(
