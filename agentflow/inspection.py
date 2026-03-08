@@ -170,6 +170,22 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
     return ", ".join(parts)
 
 
+def _execution_mode_summary(node_plan: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+
+    tools = node_plan.get("tools")
+    if tools:
+        parts.append(f"tools={tools}")
+
+    capture = node_plan.get("capture")
+    if capture:
+        parts.append(f"capture={capture}")
+
+    if not parts:
+        return None
+    return ", ".join(parts)
+
+
 def build_launch_inspection(
     pipeline: PipelineSpec,
     *,
@@ -209,6 +225,8 @@ def build_launch_inspection(
             "id": node.id,
             "agent": node.agent.value,
             "model": node.model,
+            "tools": node.tools.value,
+            "capture": node.capture.value,
             "depends_on": list(node.depends_on),
             "provider": node.provider.model_dump(mode="json") if hasattr(node.provider, "model_dump") else node.provider,
             "resolved_provider": resolved_provider.model_dump(mode="json") if resolved_provider is not None else None,
@@ -295,6 +313,12 @@ def build_launch_inspection_summary(report: dict[str, Any]) -> dict[str, Any]:
         model = node.get("model")
         if model:
             node_summary["model"] = model
+        tools = node.get("tools")
+        if tools:
+            node_summary["tools"] = tools
+        capture = node.get("capture")
+        if capture:
+            node_summary["capture"] = capture
         provider_summary = _provider_summary(node)
         if provider_summary:
             node_summary["provider"] = provider_summary
@@ -348,6 +372,9 @@ def render_launch_inspection_summary(report: dict[str, Any]) -> str:
             lines.append(f"  Render error: {node['render_error']}")
         if node.get("model"):
             lines.append(f"  Model: {node['model']}")
+        execution_mode_summary = _execution_mode_summary(node)
+        if execution_mode_summary:
+            lines.append(f"  Mode: {execution_mode_summary}")
         provider_summary = _provider_summary(node)
         if provider_summary:
             lines.append(f"  Provider: {provider_summary}")

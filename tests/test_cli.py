@@ -149,6 +149,7 @@ nodes:
     assert "Note: Dependency references use placeholder node outputs" in result.stdout
     assert "- plan [codex/local]" in result.stdout
     assert "Model: gpt-5" in result.stdout
+    assert "Mode: tools=read_only, capture=final" in result.stdout
     assert "Bootstrap: shell=bash, login=true, interactive=true, init=kimi" in result.stdout
     assert "Launch: bash -l -i -c 'kimi && eval \"$AGENTFLOW_TARGET_COMMAND\"'" in result.stdout
     assert "Runtime files: codex_home/config.toml" in result.stdout
@@ -194,6 +195,8 @@ nodes:
         "match_summary": ["review (claude) via `target.shell_init`"],
     }
     assert [node["id"] for node in payload["nodes"]] == ["review"]
+    assert payload["nodes"][0]["tools"] == "read_only"
+    assert payload["nodes"][0]["capture"] == "final"
     assert payload["nodes"][0]["resolved_provider"] == {
         "name": "kimi",
         "base_url": "https://api.kimi.com/coding/",
@@ -244,6 +247,8 @@ nodes:
             "id": "review",
             "agent": "claude",
             "target": "local",
+            "tools": "read_only",
+            "capture": "final",
             "provider": "kimi, key=ANTHROPIC_API_KEY, url=https://api.kimi.com/coding/",
             "bootstrap": "shell=bash, login=true, interactive=true, init=kimi",
             "prompt_preview": "Reply with exactly: claude ok",
