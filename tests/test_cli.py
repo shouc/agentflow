@@ -1738,6 +1738,49 @@ def test_doctor_supports_summary_output(monkeypatch):
     assert result.stdout == "Doctor: ok\n- kimi_shell_helper: ok - ready\n"
 
 
+def test_doctor_with_pipeline_path_augments_report_for_kimi_shell_bootstrap_warning(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=False),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: warning\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- kimi_shell_bootstrap: warning - Node `claude_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_supports_json_output(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    fake_pipeline = SimpleNamespace(nodes=[])
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "json"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert json.loads(result.stdout) == {
+        "status": "ok",
+        "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+    }
+
+
 def test_doctor_can_include_shell_bridge_in_json_output(monkeypatch):
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
     monkeypatch.setattr(
