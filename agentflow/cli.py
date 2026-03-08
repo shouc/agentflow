@@ -24,8 +24,8 @@ def _build_runtime(runs_dir: str, max_concurrent_runs: int) -> tuple[RunStore, O
 def serve(
     host: str = "127.0.0.1",
     port: int = 8000,
-    runs_dir: str = ".agentflow/runs",
-    max_concurrent_runs: int = 2,
+    runs_dir: str = typer.Option(".agentflow/runs", envvar="AGENTFLOW_RUNS_DIR"),
+    max_concurrent_runs: int = typer.Option(2, envvar="AGENTFLOW_MAX_CONCURRENT_RUNS"),
 ) -> None:
     store, orchestrator = _build_runtime(runs_dir, max_concurrent_runs)
     uvicorn.run(create_app(store=store, orchestrator=orchestrator), host=host, port=port)
@@ -38,7 +38,11 @@ def validate(path: str) -> None:
 
 
 @app.command()
-def run(path: str, runs_dir: str = ".agentflow/runs", max_concurrent_runs: int = 2) -> None:
+def run(
+    path: str,
+    runs_dir: str = typer.Option(".agentflow/runs", envvar="AGENTFLOW_RUNS_DIR"),
+    max_concurrent_runs: int = typer.Option(2, envvar="AGENTFLOW_MAX_CONCURRENT_RUNS"),
+) -> None:
     store, orchestrator = _build_runtime(runs_dir, max_concurrent_runs)
     pipeline = load_pipeline_from_path(path)
 
