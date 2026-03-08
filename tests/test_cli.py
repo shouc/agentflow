@@ -32,6 +32,13 @@ def _doctor_report(status: str = "ok", detail: str = "ready") -> DoctorReport:
     )
 
 
+def _completed_subprocess(returncode: int = 0, *, stdout: str = "", stderr: str = ""):
+    def _run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args[0], returncode=returncode, stdout=stdout, stderr=stderr)
+
+    return _run
+
+
 def _shell_bridge_recommendation() -> ShellBridgeRecommendation:
     return ShellBridgeRecommendation(
         target="~/.bash_profile",
@@ -1464,6 +1471,49 @@ def test_run_auto_preflight_stops_when_local_codex_auth_is_unavailable(monkeypat
     )
 
 
+def test_run_auto_preflight_stops_when_local_claude_is_unavailable_after_shell_bootstrap(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess(returncode=1))
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("runtime should not build when preflight fails")),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            )
+        ],
+        working_path=Path.cwd(),
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["run", "custom-run.yaml", "--output", "summary"])
+
+    assert result.exit_code == 1
+    assert captured["loaded_path"] == "custom-run.yaml"
+    assert result.stdout == (
+        "Doctor: failed\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: failed - Node `claude_review` (claude) cannot launch local Claude after the node shell bootstrap; `claude --version` fails in the prepared local shell.\n"
+    )
+
+
 def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_agent(monkeypatch):
     captured: dict[str, object] = {}
     doctor_calls = 0
@@ -2007,6 +2057,7 @@ def test_smoke_auto_runs_preflight_for_custom_claude_kimi_provider_without_host_
         return _doctor_report()
 
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
     monkeypatch.setattr(
@@ -2528,6 +2579,7 @@ def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
     fake_pipeline = SimpleNamespace(
@@ -2550,6 +2602,46 @@ def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from
     assert result.stdout == (
         "Doctor: ok\n"
         "- kimi_shell_helper: ok - ready\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
+    )
+
+
+def test_doctor_with_pipeline_path_fails_when_local_claude_is_unavailable_after_shell_bootstrap(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess(returncode=1))
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            )
+        ],
+        working_path=Path.cwd(),
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 1
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: failed\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: failed - Node `claude_review` (claude) cannot launch local Claude after the node shell bootstrap; `claude --version` fails in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
@@ -2834,6 +2926,7 @@ def test_doctor_with_pipeline_path_reports_auto_preflight_metadata_in_json(monke
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     fake_pipeline = SimpleNamespace(
         nodes=[
             SimpleNamespace(
