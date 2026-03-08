@@ -343,14 +343,21 @@ def smoke(
     ),
 ) -> None:
     selected_path = path or default_smoke_pipeline_path()
-    pipeline = _load_pipeline(selected_path)
-    if _should_run_smoke_preflight(path, preflight, pipeline=pipeline):
+    pipeline = None
+    should_run_preflight = _should_run_smoke_preflight(path, preflight)
+    if not should_run_preflight and preflight == SmokePreflightMode.AUTO and path is not None:
+        pipeline = _load_pipeline(selected_path)
+        should_run_preflight = _should_run_smoke_preflight(path, preflight, pipeline=pipeline)
+
+    if should_run_preflight:
         report = _doctor_report()
         if report.status == "failed":
             _echo_doctor_report(report, output=output)
             raise typer.Exit(code=1)
         if report.status == "warning":
             _echo_doctor_report(report, output=output, err=True)
+    if pipeline is None:
+        pipeline = _load_pipeline(selected_path)
     _run_pipeline(pipeline, runs_dir, max_concurrent_runs, output)
 
 
