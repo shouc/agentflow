@@ -19,6 +19,7 @@ _KIMI_API_KEY_MISSING_EXIT_CODE = 13
 _CODEX_AFTER_KIMI_MISSING_EXIT_CODE = 14
 _KIMI_BASE_URL_MISSING_EXIT_CODE = 15
 _KIMI_BASE_URL_MISMATCH_EXIT_CODE = 16
+_CODEX_LOGIN_STATUS_AFTER_KIMI_FAILED_EXIT_CODE = 17
 _EXPECTED_KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 _REDACTED = "<redacted>"
 _BASH_INTERACTIVE_STDERR_NOISE = (
@@ -256,6 +257,29 @@ def _check_claude_host_executable() -> DoctorCheck:
         detail=(
             "`claude` is not on PATH outside the smoke shell bootstrap; "
             "`bash -lic` plus `kimi` must provide it for the bundled smoke pipeline."
+        ),
+    )
+
+
+def _reconcile_claude_host_executable_check(
+    claude_check: DoctorCheck,
+    kimi_check: DoctorCheck,
+) -> DoctorCheck:
+    if claude_check.status != "warning" or kimi_check.status != "ok":
+        return claude_check
+
+    if (
+        claude_check.detail
+        != "`claude` is not on PATH outside the smoke shell bootstrap; `bash -lic` plus `kimi` must provide it for the bundled smoke pipeline."
+    ):
+        return claude_check
+
+    return DoctorCheck(
+        name="claude",
+        status="ok",
+        detail=(
+            "`claude` is not on PATH outside the smoke shell bootstrap, but `bash -lic` plus `kimi` already "
+            "provides it for the bundled smoke pipeline."
         ),
     )
 
@@ -509,6 +533,10 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
             ),
             f"type {shlex.quote('claude')} >/dev/null 2>&1 || exit {_CLAUDE_IN_SHELL_MISSING_EXIT_CODE}",
             f"type {shlex.quote('codex')} >/dev/null 2>&1 || exit {_CODEX_AFTER_KIMI_MISSING_EXIT_CODE}",
+            (
+                "codex login status >/dev/null 2>&1 "
+                f"|| exit {_CODEX_LOGIN_STATUS_AFTER_KIMI_FAILED_EXIT_CODE}"
+            ),
         ]
     )
     try:
@@ -532,7 +560,8 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
             detail=(
                 "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
                 f"sets `ANTHROPIC_BASE_URL={_EXPECTED_KIMI_ANTHROPIC_BASE_URL}`, "
-                "and keeps both `claude` and `codex` available for the bundled smoke pipeline."
+                "keeps both `claude` and `codex` available, and confirms `codex login status` succeeds "
+                "for the bundled smoke pipeline."
             ),
         )
     if result.returncode == _KIMI_HELPER_MISSING_EXIT_CODE:
@@ -557,6 +586,15 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
             detail=(
                 "`kimi` runs in `bash -lic`, but `codex` is unavailable afterwards; "
                 "the bundled smoke pipeline will not be able to launch Codex inside that shared Kimi bootstrap."
+            ),
+        )
+    if result.returncode == _CODEX_LOGIN_STATUS_AFTER_KIMI_FAILED_EXIT_CODE:
+        return DoctorCheck(
+            name="kimi_shell_helper",
+            status="failed",
+            detail=(
+                "`kimi` runs in `bash -lic`, and `codex` is on PATH afterwards, but `codex login status` still "
+                "fails; make sure Codex is logged in or `OPENAI_API_KEY` is exported in that shared smoke shell."
             ),
         )
     if result.returncode == _KIMI_API_KEY_MISSING_EXIT_CODE:
@@ -600,18 +638,23 @@ def _reconcile_codex_executable_check(
     codex_check: DoctorCheck,
     kimi_check: DoctorCheck,
 ) -> DoctorCheck:
-    if codex_check.status != "failed" or kimi_check.status != "ok":
+    if kimi_check.status != "ok":
         return codex_check
 
-    if codex_check.detail != "`codex` is not on PATH and is unavailable in `bash -lic`.":
+    accepted_details = {
+        "`codex` is not on PATH and is unavailable in `bash -lic`.",
+        "`codex` is not on PATH outside the bundled smoke login shell; `bash -lic` must provide it for the local smoke pipeline.",
+        "`codex` is not on PATH outside the smoke shell bootstrap; `bash -lic` plus `kimi` must provide it for the bundled smoke pipeline.",
+    }
+    if codex_check.status not in {"failed", "warning"} or codex_check.detail not in accepted_details:
         return codex_check
 
     return DoctorCheck(
         name="codex",
-        status="warning",
+        status="ok",
         detail=(
-            "`codex` is not on PATH outside the smoke shell bootstrap; "
-            "`bash -lic` plus `kimi` must provide it for the bundled smoke pipeline."
+            "`codex` is not on PATH outside the smoke shell bootstrap, but `bash -lic` plus `kimi` already "
+            "provides it for the bundled smoke pipeline."
         ),
     )
 
@@ -648,13 +691,15 @@ def _reconcile_bash_login_startup_check(
 def build_local_smoke_doctor_report(home: Path | None = None) -> DoctorReport:
     resolved_home = home or Path.home()
     codex_check = _check_codex_executable(resolved_home)
+    claude_check = _check_claude_host_executable()
     bash_login_check = _check_bash_login_startup(resolved_home)
     kimi_check = _check_kimi_shell_helper(resolved_home)
     codex_check = _reconcile_codex_executable_check(codex_check, kimi_check)
+    claude_check = _reconcile_claude_host_executable_check(claude_check, kimi_check)
     bash_login_check = _reconcile_bash_login_startup_check(resolved_home, bash_login_check, kimi_check)
     checks = [
         codex_check,
-        _check_claude_host_executable(),
+        claude_check,
         bash_login_check,
         kimi_check,
     ]

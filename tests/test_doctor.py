@@ -9,8 +9,8 @@ from agentflow.doctor import build_bash_login_shell_bridge_recommendation, build
 
 _KIMI_HELPER_OK_DETAIL = (
     "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
-    "sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`, and keeps both `claude` and `codex` available "
-    "for the bundled smoke pipeline."
+    "sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`, keeps both `claude` and `codex` available, "
+    "and confirms `codex login status` succeeds for the bundled smoke pipeline."
 )
 
 
@@ -398,7 +398,7 @@ def test_local_smoke_doctor_report_checks_kimi_helper_in_supplied_home(tmp_path:
     }
 
 
-def test_local_smoke_doctor_report_warns_when_claude_is_only_available_in_bash_shell(tmp_path: Path, monkeypatch):
+def test_local_smoke_doctor_report_accepts_claude_when_bootstrap_already_provides_it(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
@@ -417,11 +417,11 @@ def test_local_smoke_doctor_report_warns_when_claude_is_only_available_in_bash_s
 
     report = build_local_smoke_doctor_report(home=home)
 
-    assert report.status == "warning"
+    assert report.status == "ok"
     assert report.as_dict()["checks"][1] == {
         "name": "claude",
-        "status": "warning",
-        "detail": "`claude` is not on PATH outside the smoke shell bootstrap; `bash -lic` plus `kimi` must provide it for the bundled smoke pipeline.",
+        "status": "ok",
+        "detail": "`claude` is not on PATH outside the smoke shell bootstrap, but `bash -lic` plus `kimi` already provides it for the bundled smoke pipeline.",
     }
     assert report.as_dict()["checks"][-1] == {
         "name": "kimi_shell_helper",
@@ -430,7 +430,7 @@ def test_local_smoke_doctor_report_warns_when_claude_is_only_available_in_bash_s
     }
 
 
-def test_local_smoke_doctor_report_warns_when_codex_is_only_available_in_bash_shell(tmp_path: Path, monkeypatch):
+def test_local_smoke_doctor_report_accepts_codex_when_bootstrap_already_provides_it(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
@@ -449,15 +449,15 @@ def test_local_smoke_doctor_report_warns_when_codex_is_only_available_in_bash_sh
 
     report = build_local_smoke_doctor_report(home=home)
 
-    assert report.status == "warning"
+    assert report.status == "ok"
     assert report.as_dict()["checks"][0] == {
         "name": "codex",
-        "status": "warning",
-        "detail": "`codex` is not on PATH outside the bundled smoke login shell; `bash -lic` must provide it for the local smoke pipeline.",
+        "status": "ok",
+        "detail": "`codex` is not on PATH outside the smoke shell bootstrap, but `bash -lic` plus `kimi` already provides it for the bundled smoke pipeline.",
     }
 
 
-def test_local_smoke_doctor_report_warns_when_codex_is_only_available_after_kimi_bootstrap(tmp_path: Path, monkeypatch):
+def test_local_smoke_doctor_report_accepts_codex_when_kimi_bootstrap_provides_it(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
@@ -479,11 +479,11 @@ def test_local_smoke_doctor_report_warns_when_codex_is_only_available_after_kimi
 
     report = build_local_smoke_doctor_report(home=home)
 
-    assert report.status == "warning"
+    assert report.status == "ok"
     assert report.as_dict()["checks"][0] == {
         "name": "codex",
-        "status": "warning",
-        "detail": "`codex` is not on PATH outside the smoke shell bootstrap; `bash -lic` plus `kimi` must provide it for the bundled smoke pipeline.",
+        "status": "ok",
+        "detail": "`codex` is not on PATH outside the smoke shell bootstrap, but `bash -lic` plus `kimi` already provides it for the bundled smoke pipeline.",
     }
     assert report.as_dict()["checks"][-1] == {
         "name": "kimi_shell_helper",
@@ -604,6 +604,28 @@ def test_local_smoke_doctor_report_fails_when_codex_is_missing_after_kimi_bootst
         "name": "kimi_shell_helper",
         "status": "failed",
         "detail": "`kimi` runs in `bash -lic`, but `codex` is unavailable afterwards; the bundled smoke pipeline will not be able to launch Codex inside that shared Kimi bootstrap.",
+    }
+
+
+def test_local_smoke_doctor_report_fails_when_codex_is_not_logged_in_after_kimi_bootstrap(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
+    monkeypatch.setattr(
+        "agentflow.doctor.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=17, stdout="", stderr="Not logged in\n"),
+    )
+
+    report = build_local_smoke_doctor_report(home=home)
+
+    assert report.status == "failed"
+    assert report.as_dict()["checks"][-1] == {
+        "name": "kimi_shell_helper",
+        "status": "failed",
+        "detail": "`kimi` runs in `bash -lic`, and `codex` is on PATH afterwards, but `codex login status` still fails; make sure Codex is logged in or `OPENAI_API_KEY` is exported in that shared smoke shell.",
     }
 
 
