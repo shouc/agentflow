@@ -2744,6 +2744,67 @@ def test_check_local_stops_when_doctor_fails(monkeypatch):
     assert result.stdout == ""
 
 
+def test_doctor_custom_non_kimi_pipeline_skips_bundled_smoke_prereqs(monkeypatch):
+    fake_pipeline = SimpleNamespace(nodes=[])
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report(status="failed", detail="missing kimi"))
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: "examples/local-real-agents-kimi-smoke.yaml")
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: fake_pipeline)
+
+    result = runner.invoke(app, ["doctor", "examples/custom.yaml", "--output", "json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "status": "ok",
+        "checks": [],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": False,
+                "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
+    }
+
+
+def test_check_local_custom_non_kimi_pipeline_skips_bundled_smoke_prereqs(monkeypatch):
+    captured: dict[str, object] = {}
+    fake_pipeline = SimpleNamespace(nodes=[])
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="check-local-custom")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            return _completed_run(run_id, pipeline_name="custom")
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report(status="failed", detail="missing kimi"))
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: "examples/local-real-agents-kimi-smoke.yaml")
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: fake_pipeline)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (
+            SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id),
+            FakeOrchestrator(),
+        ),
+    )
+
+    result = runner.invoke(app, ["check-local", "examples/custom.yaml"])
+
+    assert result.exit_code == 0
+    assert result.stderr == (
+        "Doctor: ok\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+    assert "Run check-local-custom: completed" in result.stdout
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "check-local-custom"
+
+
 def test_smoke_runs_when_bundled_preflight_warns(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -3686,7 +3747,6 @@ def test_doctor_with_pipeline_path_fails_when_kimi_node_is_missing_kimi_api_key(
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
-        "- kimi_shell_helper: ok - ready\n"
         "- provider_credentials: failed - Node `kimi_review` (kimi) requires `KIMI_API_KEY` for provider `moonshot`, but it is not set in the current environment, `node.env`, or `provider.env`.\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
@@ -3889,7 +3949,6 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_shell_init_
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
-        "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
@@ -3923,7 +3982,6 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_split_shell
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
-        "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
@@ -4036,7 +4094,6 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_shell_wrapp
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
-        "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
@@ -4068,7 +4125,6 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_shell_prefi
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
-        "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
@@ -4100,7 +4156,6 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_split_shell
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
-        "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
@@ -4130,7 +4185,6 @@ def test_doctor_with_pipeline_path_accepts_kimi_api_key_from_node_env(monkeypatc
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
-        "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
@@ -4189,7 +4243,7 @@ def test_doctor_with_pipeline_path_supports_json_output(monkeypatch):
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert json.loads(result.stdout) == {
         "status": "ok",
-        "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+        "checks": [],
         "pipeline": {
             "auto_preflight": {
                 "enabled": False,

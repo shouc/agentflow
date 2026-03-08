@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from agentflow.defaults import default_smoke_pipeline_path
 from agentflow.doctor import (
     DoctorCheck,
+    DoctorReport,
     build_bash_login_shell_bridge_recommendation,
     build_pipeline_local_kimi_readiness_checks,
     build_pipeline_local_claude_readiness_checks,
@@ -342,6 +343,14 @@ def _doctor_report():
     return build_local_smoke_doctor_report()
 
 
+def _empty_doctor_report() -> DoctorReport:
+    return DoctorReport(status="ok", checks=[])
+
+
+def _path_matches_bundled_smoke(path: str) -> bool:
+    return Path(path).expanduser().resolve() == Path(default_smoke_pipeline_path()).expanduser().resolve()
+
+
 def _extend_doctor_report(report: object, extra_checks: list[DoctorCheck]) -> object:
     if not extra_checks:
         return report
@@ -432,6 +441,8 @@ def _doctor_report_for_path(path: str | None = None) -> tuple[object, dict[str, 
             return report, None, None
         return _extend_doctor_report(report, _pipeline_launch_env_override_checks(pipeline)), None, pipeline
     pipeline = _load_pipeline(path)
+    if not _path_matches_bundled_smoke(path) and not _pipeline_uses_kimi_smoke_preflight(pipeline):
+        report = _empty_doctor_report()
     return _augment_preflight_report(report, pipeline), {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)}, pipeline
 
 
@@ -664,9 +675,7 @@ def _augment_preflight_report(report: object, pipeline: object) -> object:
 
 
 def _auto_smoke_preflight_reason(path: str, pipeline: object) -> str | None:
-    resolved_path = Path(path).expanduser().resolve()
-    bundled_path = Path(default_smoke_pipeline_path()).expanduser().resolve()
-    if resolved_path == bundled_path:
+    if _path_matches_bundled_smoke(path):
         return "path matches the bundled real-agent smoke pipeline."
     if _pipeline_uses_kimi_smoke_preflight(pipeline):
         return "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap."
@@ -704,7 +713,7 @@ def _should_run_smoke_preflight(
         return False
     if path is None:
         return True
-    if Path(path).expanduser().resolve() == Path(default_smoke_pipeline_path()).expanduser().resolve():
+    if _path_matches_bundled_smoke(path):
         return True
     if pipeline is None:
         return False

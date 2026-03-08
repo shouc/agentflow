@@ -64,6 +64,16 @@ def test_should_probe_local_claude_for_custom_kimi_provider_env_base_url():
     assert _should_probe_local_claude(node) is True
 
 
+def test_should_probe_local_claude_for_generic_local_target():
+    node = SimpleNamespace(
+        agent=SimpleNamespace(value="claude"),
+        provider=None,
+        target=SimpleNamespace(kind="local", shell=None, shell_login=False, shell_interactive=False, shell_init=None),
+    )
+
+    assert _should_probe_local_claude(node) is True
+
+
 def test_pipeline_local_codex_checks_use_custom_executable(monkeypatch):
     pipeline = SimpleNamespace(
         nodes=[

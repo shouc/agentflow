@@ -428,16 +428,7 @@ def _should_probe_local_claude(node: object) -> bool:
         return False
     if kimi_shell_init_requires_interactive_bash_warning(target) is not None:
         return False
-
-    provider = resolve_provider(_object_value(node, "provider"), AgentKind.CLAUDE)
-    if provider_uses_kimi_anthropic_auth(provider):
-        return True
-
-    if shell_init_uses_kimi_helper(_object_value(target, "shell_init")):
-        return True
-
-    shell = _object_value(target, "shell")
-    return shell_command_uses_kimi_helper(shell if isinstance(shell, str) else None)
+    return True
 
 
 def _prepared_claude_readiness_execution(
