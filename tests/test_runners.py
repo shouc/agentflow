@@ -190,7 +190,7 @@ async def test_local_runner_shell_init_adds_interactive_flag_after_env_wrapper_o
         }
     )
     prepared = PreparedExecution(
-        command=["bash", "-lc", 'printf "%s" "$WRAPPED_VALUE"'],
+        command=["python3", "-c", 'import os; print(os.getenv("WRAPPED_VALUE", ""))'],
         env={},
         cwd=str(tmp_path),
         trace_kind="claude",

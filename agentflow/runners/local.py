@@ -12,6 +12,17 @@ from agentflow.specs import LocalTarget, NodeSpec
 
 
 class LocalRunner(Runner):
+    _KNOWN_SHELL_EXECUTABLES = {
+        "ash",
+        "bash",
+        "dash",
+        "fish",
+        "ksh",
+        "mksh",
+        "pwsh",
+        "sh",
+        "zsh",
+    }
     _INTERACTIVE_SHELL_STDERR_NOISE = (
         "bash: cannot set terminal process group (",
         "bash: initialize_job_control: no job control in background:",
@@ -23,14 +34,104 @@ class LocalRunner(Runner):
         "the prepared agent command."
     )
 
+    def _shell_executable_index(self, shell_parts: list[str]) -> int | None:
+        for index, part in enumerate(shell_parts):
+            if os.path.basename(part) in self._KNOWN_SHELL_EXECUTABLES:
+                return index
+        if not shell_parts:
+            return None
+        return 0
+
+    def _looks_like_env_assignment(self, token: str) -> bool:
+        if "=" not in token or token.startswith("="):
+            return False
+        name, _ = token.split("=", 1)
+        if not name:
+            return False
+        return name.replace("_", "a").isalnum() and not name[0].isdigit()
+
+    def _env_wrapper_shell_index(self, command: list[str]) -> int | None:
+        if not command or os.path.basename(command[0]) != "env":
+            return None
+
+        position = 1
+        ignore_environment = False
+        while position < len(command):
+            token = command[position]
+            if token == "--":
+                position += 1
+                break
+            if token in {"-i", "--ignore-environment"}:
+                ignore_environment = True
+                position += 1
+                continue
+            if token == "-u":
+                position += 2
+                continue
+            if token.startswith("--unset=") or (token.startswith("-u") and len(token) > 2):
+                position += 1
+                continue
+            if token.startswith("-"):
+                position += 1
+                continue
+            if self._looks_like_env_assignment(token):
+                position += 1
+                continue
+            break
+
+        if not ignore_environment or position >= len(command):
+            return None
+        return position
+
+    def _env_wrapper_reserved_names(self, command: list[str], shell_index: int) -> set[str]:
+        reserved: set[str] = set()
+        position = 1
+        while position < shell_index:
+            token = command[position]
+            if token == "--":
+                break
+            if token == "-u" and position + 1 < shell_index:
+                reserved.add(command[position + 1])
+                position += 2
+                continue
+            if token.startswith("--unset="):
+                reserved.add(token.split("=", 1)[1])
+                position += 1
+                continue
+            if token.startswith("-u") and len(token) > 2:
+                reserved.add(token[2:])
+                position += 1
+                continue
+            if self._looks_like_env_assignment(token):
+                reserved.add(token.split("=", 1)[0])
+            position += 1
+        return reserved
+
+    def _inline_env_wrapper_assignments(self, command: list[str], env: dict[str, str]) -> list[str]:
+        shell_index = self._env_wrapper_shell_index(command)
+        if shell_index is None or not env:
+            return command
+
+        reserved_names = self._env_wrapper_reserved_names(command, shell_index)
+        assignments = [f"{key}={value}" for key, value in env.items() if key not in reserved_names]
+        if not assignments:
+            return command
+        return [*command[:shell_index], *assignments, *command[shell_index:]]
+
     def _has_flag(self, shell_parts: list[str], short_flag: str, long_flag: str | None = None) -> bool:
+        shell_index = self._shell_executable_index(shell_parts)
+        if shell_index is None:
+            return False
         return any(
             part == long_flag or (part.startswith("-") and not part.startswith("--") and short_flag in part[1:])
-            for part in shell_parts[1:]
+            for part in shell_parts[shell_index + 1 :]
         )
 
     def _command_flag_index(self, shell_parts: list[str]) -> int | None:
-        for index, part in enumerate(shell_parts[1:], start=1):
+        shell_index = self._shell_executable_index(shell_parts)
+        if shell_index is None:
+            return None
+        for index, part in enumerate(shell_parts[shell_index + 1 :], start=shell_index + 1):
             if part == "--command" or (part.startswith("-") and not part.startswith("--") and "c" in part[1:]):
                 return index
         return None
@@ -118,6 +219,7 @@ class LocalRunner(Runner):
         command, target_env = self._command_for_target(node, prepared)
         plan_env = self._augment_local_env(prepared, paths)
         plan_env.update(target_env)
+        command = self._inline_env_wrapper_assignments(command, plan_env)
         return LaunchPlan(
             command=command,
             env=plan_env,
@@ -169,10 +271,12 @@ class LocalRunner(Runner):
         should_cancel,
     ) -> RawExecutionResult:
         self.materialize_runtime_files(paths.host_runtime_dir, prepared.runtime_files)
-        env = os.environ.copy()
-        env.update(self._augment_local_env(prepared, paths))
+        launch_env = self._augment_local_env(prepared, paths)
         command, target_env = self._command_for_target(node, prepared)
-        env.update(target_env)
+        launch_env.update(target_env)
+        env = os.environ.copy()
+        env.update(launch_env)
+        command = self._inline_env_wrapper_assignments(command, launch_env)
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=prepared.cwd,
