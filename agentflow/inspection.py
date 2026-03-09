@@ -176,6 +176,10 @@ def _has_nonempty_env_value(env: object, key: str) -> bool:
     return isinstance(env, dict) and bool(str(env.get(key, "")).strip())
 
 
+def _env_declares_key(env: object, key: str) -> bool:
+    return isinstance(env, dict) and key in env
+
+
 def _resolved_auth_requirement(node: NodeSpec) -> tuple[str | None, str | None]:
     resolved_provider = resolve_execution_provider(node.provider, node.agent)
     if resolved_provider is not None and resolved_provider.api_key_env:
@@ -342,11 +346,16 @@ def _target_warnings(target: dict[str, Any]) -> list[str]:
 
 
 def _launch_env_override_warning(key: str, current_value: str, launch_value: str) -> str | None:
-    if not current_value.strip() or not launch_value.strip() or current_value == launch_value:
+    if not current_value.strip() or current_value == launch_value:
         return None
 
     if key.endswith("_BASE_URL"):
-        return f"Launch env overrides current `{key}` from `{current_value}` to `{launch_value}`."
+        if launch_value.strip():
+            return f"Launch env overrides current `{key}` from `{current_value}` to `{launch_value}`."
+        return f"Launch env clears current `{key}` value `{current_value}`."
+
+    if not launch_value.strip():
+        return None
 
     if key.endswith("_CUSTOM_HEADERS") or looks_sensitive_key(key):
         return f"Launch env overrides current `{key}` for this node."
@@ -375,18 +384,23 @@ def _format_launch_env_override_detail(detail: dict[str, Any]) -> str:
     if detail.get("redacted"):
         return f"Launch env overrides current `{key}` for this node{source_suffix}."
 
+    current_value = str(detail.get("current_value", ""))
+    launch_value = str(detail.get("launch_value", ""))
+    if not launch_value.strip():
+        return f"Launch env clears current `{key}` value `{current_value}`{source_suffix}."
+
     return (
-        f"Launch env overrides current `{key}` from `{detail['current_value']}` to `{detail['launch_value']}`"
+        f"Launch env overrides current `{key}` from `{current_value}` to `{launch_value}`"
         f"{source_suffix}."
     )
 
 
 def _launch_env_override_source(node: NodeSpec, resolved_provider: Any, key: str) -> dict[str, str] | None:
-    if _has_nonempty_env_value(node.env, key):
+    if _env_declares_key(node.env, key):
         return {"source": "node.env"}
 
     provider_env = getattr(resolved_provider, "env", None)
-    if _has_nonempty_env_value(provider_env, key):
+    if _env_declares_key(provider_env, key):
         return {"source": "provider.env"}
 
     if resolved_provider is None:

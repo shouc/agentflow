@@ -423,7 +423,12 @@ def _pipeline_launch_env_override_checks(nodes: list[dict[str, object]]) -> list
                 current_value = override.get("current_value")
                 launch_value = override.get("launch_value")
                 if isinstance(current_value, str) and isinstance(launch_value, str):
-                    if status == "ok":
+                    if not launch_value.strip():
+                        detail = (
+                            f"Node `{node_id}`: Launch env clears current `{key}` value `{current_value}`"
+                            f"{source_label}."
+                        )
+                    elif status == "ok":
                         detail = (
                             f"Node `{node_id}`: Launch env uses configured `{key}` value `{launch_value}` "
                             f"instead of current `{current_value}`{source_label}."
