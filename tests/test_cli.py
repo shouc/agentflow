@@ -489,7 +489,7 @@ nodes:
     ]
 
 
-def test_inspect_command_summary_skips_current_base_url_inheritance_when_node_env_clears_it(tmp_path, monkeypatch):
+def test_inspect_command_summary_warns_when_node_env_clears_current_base_url(tmp_path, monkeypatch):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
         """name: inspect-base-url-cleared
@@ -510,7 +510,17 @@ nodes:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert "launch_env_inheritances" not in payload["nodes"][0]
-    assert not payload["nodes"][0].get("warnings")
+    assert payload["nodes"][0]["launch_env_overrides"] == [
+        {
+            "key": "OPENAI_BASE_URL",
+            "current_value": "https://oai-relay.ctf.so/openai",
+            "launch_value": "",
+            "source": "node.env",
+        }
+    ]
+    assert payload["nodes"][0]["warnings"] == [
+        "Launch env clears current `OPENAI_BASE_URL` value `https://oai-relay.ctf.so/openai` via `node.env`."
+    ]
 
 
 def test_inspect_command_summary_skips_current_base_url_inheritance_for_container_targets(tmp_path, monkeypatch):
@@ -4847,7 +4857,7 @@ nodes:
     )
 
 
-def test_doctor_with_pipeline_path_skips_current_base_url_inheritance_when_node_env_clears_it(tmp_path, monkeypatch):
+def test_doctor_with_pipeline_path_reports_when_node_env_clears_current_base_url(tmp_path, monkeypatch):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
         """name: doctor-base-url-cleared
@@ -4870,6 +4880,7 @@ nodes:
     assert result.exit_code == 0
     assert result.stdout == (
         "Doctor: ok\n"
+        "- launch_env_override: ok - Node `plan`: Launch env clears current `OPENAI_BASE_URL` value `https://oai-relay.ctf.so/openai` via `node.env`.\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
