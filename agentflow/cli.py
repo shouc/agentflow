@@ -648,6 +648,13 @@ def _node_kimi_smoke_preflight_match(node: object) -> dict[str, str] | None:
 
     node_id = str(getattr(node, "id", None) or agent)
 
+    if str(getattr(target, "bootstrap", "")).strip().lower() == "kimi":
+        return {
+            "node_id": node_id,
+            "agent": agent,
+            "trigger": "target.bootstrap",
+        }
+
     shell_init = getattr(target, "shell_init", None)
     if shell_init_uses_kimi_helper(shell_init):
         return {

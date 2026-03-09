@@ -61,6 +61,25 @@ class ProviderConfig(BaseModel):
 
 
 _KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
+_LOCAL_KIMI_BOOTSTRAP_SHELL_INIT = ("command -v kimi >/dev/null 2>&1", "kimi")
+
+
+def _normalize_local_bootstrap(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    return normalized or None
+
+
+def _local_bootstrap_defaults(bootstrap: str) -> dict[str, Any]:
+    if bootstrap == "kimi":
+        return {
+            "shell": "bash",
+            "shell_login": True,
+            "shell_interactive": True,
+            "shell_init": list(_LOCAL_KIMI_BOOTSTRAP_SHELL_INIT),
+        }
+    return {}
 
 
 def _normalized_provider_base_url(value: str | None) -> str | None:
@@ -206,10 +225,37 @@ class LocalTarget(BaseModel):
 
     kind: Literal["local"] = "local"
     cwd: str | None = None
+    bootstrap: str | None = None
     shell: str | None = None
     shell_login: bool = False
     shell_interactive: bool = False
     shell_init: str | list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_bootstrap_defaults(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        bootstrap = _normalize_local_bootstrap(data.get("bootstrap"))
+        if bootstrap is None:
+            return data
+
+        updated = dict(data)
+        for key, value in _local_bootstrap_defaults(bootstrap).items():
+            if key not in updated or updated[key] is None:
+                updated[key] = value
+        return updated
+
+    @field_validator("bootstrap")
+    @classmethod
+    def validate_bootstrap(cls, value: str | None) -> str | None:
+        normalized = _normalize_local_bootstrap(value)
+        if normalized is None:
+            return None
+        if normalized != "kimi":
+            raise ValueError("`target.bootstrap` must be `kimi`")
+        return normalized
 
     @field_validator("shell_init")
     @classmethod

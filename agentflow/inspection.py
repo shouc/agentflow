@@ -204,6 +204,9 @@ def _kimi_helper_bootstrap_source(target: object) -> tuple[str, str] | None:
     if getattr(target, "kind", None) != "local":
         return None
 
+    if str(getattr(target, "bootstrap", "")).strip().lower() == "kimi":
+        return ("`target.bootstrap` (`kimi` helper)", "target.bootstrap")
+
     shell_init = getattr(target, "shell_init", None)
     if shell_init_uses_kimi_helper(shell_init):
         return ("`target.shell_init` (`kimi` helper)", "target.shell_init")
@@ -308,6 +311,10 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
         return None
 
     parts: list[str] = []
+    bootstrap = target.get("bootstrap")
+    if bootstrap:
+        parts.append(f"preset={bootstrap}")
+
     shell = target.get("shell")
     if shell:
         parts.append(f"shell={redact_sensitive_shell_text(shell)}")

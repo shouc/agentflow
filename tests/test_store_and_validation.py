@@ -186,6 +186,61 @@ def test_pipeline_validation_applies_local_target_defaults_to_local_nodes():
     assert pipeline.nodes[2].target.kind == "container"
 
 
+def test_pipeline_validation_expands_kimi_bootstrap_shorthand():
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "local-bootstrap-shorthand",
+            "working_dir": ".",
+            "local_target_defaults": {
+                "bootstrap": "kimi",
+            },
+            "nodes": [
+                {"id": "plan", "agent": "codex", "prompt": "plan"},
+                {
+                    "id": "review",
+                    "agent": "claude",
+                    "prompt": "review",
+                    "target": {"bootstrap": "kimi", "cwd": "review-work"},
+                },
+            ],
+        }
+    )
+
+    assert pipeline.local_target_defaults is not None
+    assert pipeline.local_target_defaults.bootstrap == "kimi"
+    assert pipeline.local_target_defaults.shell == "bash"
+    assert pipeline.local_target_defaults.shell_login is True
+    assert pipeline.local_target_defaults.shell_interactive is True
+    assert pipeline.local_target_defaults.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
+    assert pipeline.nodes[0].target.bootstrap == "kimi"
+    assert pipeline.nodes[0].target.shell == "bash"
+    assert pipeline.nodes[0].target.shell_login is True
+    assert pipeline.nodes[0].target.shell_interactive is True
+    assert pipeline.nodes[0].target.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
+    assert pipeline.nodes[1].target.bootstrap == "kimi"
+    assert pipeline.nodes[1].target.cwd == "review-work"
+    assert pipeline.nodes[1].target.shell == "bash"
+    assert pipeline.nodes[1].target.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
+
+
+def test_pipeline_validation_rejects_unknown_local_bootstrap():
+    with pytest.raises(ValidationError, match=r"target\.bootstrap.*must be `kimi`"):
+        PipelineSpec.model_validate(
+            {
+                "name": "invalid-local-bootstrap",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "plan",
+                        "agent": "claude",
+                        "prompt": "plan",
+                        "target": {"kind": "local", "bootstrap": "other"},
+                    },
+                ],
+            }
+        )
+
+
 def test_pipeline_validation_accepts_shell_init_command_lists():
     pipeline = PipelineSpec.model_validate(
         {
