@@ -6,6 +6,7 @@ from pathlib import Path
 _BUNDLED_TEMPLATE_FILES = {
     "pipeline": "pipeline.yaml",
     "local-kimi-smoke": "local-real-agents-kimi-smoke.yaml",
+    "local-kimi-shell-init-smoke": "local-real-agents-kimi-shell-init-smoke.yaml",
 }
 
 DEFAULT_PIPELINE_YAML = """name: parallel-code-orchestration

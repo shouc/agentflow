@@ -1,0 +1,30 @@
+name: local-real-agents-kimi-shell-init-smoke
+description: Minimal parallel real-agent smoke test for local Codex plus Claude-on-Kimi via explicit shell_init bootstrap.
+working_dir: .
+concurrency: 2
+local_target_defaults:
+  shell: bash
+  shell_login: true
+  shell_interactive: true
+  shell_init: kimi
+nodes:
+  - id: codex_plan
+    agent: codex
+    env:
+      OPENAI_BASE_URL: ""
+    prompt: |
+      Reply with exactly: codex ok
+    timeout_seconds: 180
+    success_criteria:
+      - kind: output_contains
+        value: codex ok
+
+  - id: claude_review
+    agent: claude
+    provider: kimi
+    prompt: |
+      Reply with exactly: claude ok
+    timeout_seconds: 180
+    success_criteria:
+      - kind: output_contains
+        value: claude ok
