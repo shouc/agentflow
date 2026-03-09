@@ -397,10 +397,24 @@ def _local_codex_auth_check_detail(node_id: str) -> str:
     )
 
 
+def _local_codex_auth_ok_check_detail(node_id: str) -> str:
+    return (
+        f"Node `{node_id}` (codex) can authenticate local Codex after the node shell bootstrap via "
+        "`codex login status` or `OPENAI_API_KEY`."
+    )
+
+
 def _local_codex_ready_check_detail(node_id: str, executable: str) -> str:
     return (
         f"Node `{node_id}` (codex) cannot launch local Codex after the node shell bootstrap; "
         f"`{executable} --version` fails in the prepared local shell."
+    )
+
+
+def _local_codex_ready_ok_check_detail(node_id: str, executable: str) -> str:
+    return (
+        f"Node `{node_id}` (codex) can launch local Codex after the node shell bootstrap; "
+        f"`{executable} --version` succeeds in the prepared local shell."
     )
 
 
@@ -411,10 +425,24 @@ def _local_claude_ready_check_detail(node_id: str, executable: str) -> str:
     )
 
 
+def _local_claude_ready_ok_check_detail(node_id: str, executable: str) -> str:
+    return (
+        f"Node `{node_id}` (claude) can launch local Claude after the node shell bootstrap; "
+        f"`{executable} --version` succeeds in the prepared local shell."
+    )
+
+
 def _local_kimi_ready_check_detail(node_id: str, probe_command: str) -> str:
     return (
         f"Node `{node_id}` (kimi) cannot launch the local Kimi bridge after the node shell bootstrap; "
         f"`{probe_command}` fails in the prepared local shell."
+    )
+
+
+def _local_kimi_ready_ok_check_detail(node_id: str, probe_command: str) -> str:
+    return (
+        f"Node `{node_id}` (kimi) can launch the local Kimi bridge after the node shell bootstrap; "
+        f"`{probe_command}` succeeds in the prepared local shell."
     )
 
 
@@ -780,6 +808,27 @@ def build_pipeline_local_claude_readiness_checks(pipeline: object) -> list[Docto
     return checks
 
 
+def build_pipeline_local_claude_readiness_info_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in _object_value(pipeline, "nodes", []) or []:
+        if _prepared_claude_readiness_execution(node, pipeline) is None:
+            continue
+
+        ready, executable, failure_detail = _can_launch_local_claude(node, pipeline)
+        if not ready:
+            continue
+
+        node_id = str(_object_value(node, "id", "claude"))
+        checks.append(
+            DoctorCheck(
+                name="claude_ready",
+                status="ok",
+                detail=failure_detail or _local_claude_ready_ok_check_detail(node_id, executable or "claude"),
+            )
+        )
+    return checks
+
+
 def build_pipeline_local_kimi_readiness_checks(pipeline: object) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     for node in _object_value(pipeline, "nodes", []) or []:
@@ -803,6 +852,31 @@ def build_pipeline_local_kimi_readiness_checks(pipeline: object) -> list[DoctorC
     return checks
 
 
+def build_pipeline_local_kimi_readiness_info_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in _object_value(pipeline, "nodes", []) or []:
+        if _prepared_kimi_readiness_execution(node, pipeline) is None:
+            continue
+
+        ready, probe_command, failure_detail = _can_launch_local_kimi(node, pipeline)
+        if not ready:
+            continue
+
+        node_id = str(_object_value(node, "id", "kimi"))
+        checks.append(
+            DoctorCheck(
+                name="kimi_ready",
+                status="ok",
+                detail=failure_detail
+                or _local_kimi_ready_ok_check_detail(
+                    node_id,
+                    probe_command or "python -c 'import agentflow.remote.kimi_bridge'",
+                ),
+            )
+        )
+    return checks
+
+
 def build_pipeline_local_codex_readiness_checks(pipeline: object) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     for node in _object_value(pipeline, "nodes", []) or []:
@@ -820,6 +894,27 @@ def build_pipeline_local_codex_readiness_checks(pipeline: object) -> list[Doctor
                 name="codex_ready",
                 status="failed",
                 detail=failure_detail or _local_codex_ready_check_detail(node_id, executable or "codex"),
+            )
+        )
+    return checks
+
+
+def build_pipeline_local_codex_readiness_info_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in _object_value(pipeline, "nodes", []) or []:
+        if _prepared_codex_readiness_execution(node, pipeline) is None:
+            continue
+
+        ready, executable, failure_detail = _can_launch_local_codex(node, pipeline)
+        if not ready:
+            continue
+
+        node_id = str(_object_value(node, "id", "codex"))
+        checks.append(
+            DoctorCheck(
+                name="codex_ready",
+                status="ok",
+                detail=failure_detail or _local_codex_ready_ok_check_detail(node_id, executable or "codex"),
             )
         )
     return checks
@@ -850,6 +945,35 @@ def build_pipeline_local_codex_auth_checks(pipeline: object) -> list[DoctorCheck
                 name="codex_auth",
                 status="failed",
                 detail=failure_detail or _local_codex_auth_check_detail(node_id),
+            )
+        )
+    return checks
+
+
+def build_pipeline_local_codex_auth_info_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in _object_value(pipeline, "nodes", []) or []:
+        agent = _status_value(_object_value(node, "agent")).lower()
+        if agent != AgentKind.CODEX.value:
+            continue
+
+        if _prepared_codex_auth_execution(node, pipeline) is None:
+            continue
+
+        ready, _, _ = _can_launch_local_codex(node, pipeline)
+        if not ready:
+            continue
+
+        authenticated, failure_detail = _can_authenticate_local_codex(node, pipeline)
+        if not authenticated:
+            continue
+
+        node_id = str(_object_value(node, "id", "codex"))
+        checks.append(
+            DoctorCheck(
+                name="codex_auth",
+                status="ok",
+                detail=failure_detail or _local_codex_auth_ok_check_detail(node_id),
             )
         )
     return checks

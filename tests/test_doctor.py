@@ -17,7 +17,9 @@ from agentflow.doctor import (
     build_local_smoke_doctor_report,
     build_pipeline_local_claude_readiness_checks,
     build_pipeline_local_codex_auth_checks,
+    build_pipeline_local_codex_auth_info_checks,
     build_pipeline_local_codex_readiness_checks,
+    build_pipeline_local_codex_readiness_info_checks,
     build_pipeline_local_kimi_readiness_checks,
 )
 from agentflow.prepared import ExecutionPaths
@@ -167,6 +169,26 @@ def test_pipeline_local_codex_checks_use_custom_executable(monkeypatch):
 
     assert build_pipeline_local_codex_readiness_checks(pipeline) == []
     assert build_pipeline_local_codex_auth_checks(pipeline) == []
+    assert build_pipeline_local_codex_readiness_info_checks(pipeline) == [
+        DoctorCheck(
+            name="codex_ready",
+            status="ok",
+            detail=(
+                "Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; "
+                "`custom-codex --version` succeeds in the prepared local shell."
+            ),
+        )
+    ]
+    assert build_pipeline_local_codex_auth_info_checks(pipeline) == [
+        DoctorCheck(
+            name="codex_auth",
+            status="ok",
+            detail=(
+                "Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via "
+                "`codex login status` or `OPENAI_API_KEY`."
+            ),
+        )
+    ]
     assert "custom-codex --version" in captured_target_commands
     assert "custom-codex login status" in captured_target_commands
 

@@ -19,11 +19,15 @@ from agentflow.doctor import (
     DoctorReport,
     build_bash_login_shell_bridge_recommendation,
     build_local_kimi_bootstrap_doctor_report,
-    build_pipeline_local_kimi_readiness_checks,
     build_pipeline_local_claude_readiness_checks,
-    build_pipeline_local_codex_readiness_checks,
-    build_local_smoke_doctor_report,
+    build_pipeline_local_claude_readiness_info_checks,
     build_pipeline_local_codex_auth_checks,
+    build_pipeline_local_codex_auth_info_checks,
+    build_pipeline_local_codex_readiness_checks,
+    build_pipeline_local_codex_readiness_info_checks,
+    build_pipeline_local_kimi_readiness_checks,
+    build_pipeline_local_kimi_readiness_info_checks,
+    build_local_smoke_doctor_report,
 )
 from agentflow.env import merge_env_layers
 from agentflow.local_shell import (
@@ -625,7 +629,15 @@ def _doctor_report_for_path(path: str | None = None) -> tuple[object, dict[str, 
         return _augment_preflight_report(report, pipeline), None, pipeline
     pipeline = _load_pipeline(path)
     report = _preflight_base_report(path, pipeline)
-    return _augment_preflight_report(report, pipeline), {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)}, pipeline
+    include_ok_local_checks = (
+        not _path_matches_bundled_smoke(path)
+        and _pipeline_uses_kimi_smoke_preflight(pipeline)
+    )
+    return (
+        _augment_preflight_report(report, pipeline, include_ok_local_checks=include_ok_local_checks),
+        {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)},
+        pipeline,
+    )
 
 
 def _preflight_shell_bridge_recommendation(report: object) -> object | None:
@@ -967,7 +979,12 @@ def _merge_doctor_status(current_status: str, extra_checks: list[DoctorCheck]) -
     return current_status
 
 
-def _augment_preflight_report(report: object, pipeline: object) -> object:
+def _augment_preflight_report(
+    report: object,
+    pipeline: object,
+    *,
+    include_ok_local_checks: bool = False,
+) -> object:
     report = _extend_doctor_report(
         report,
         [
@@ -979,6 +996,16 @@ def _augment_preflight_report(report: object, pipeline: object) -> object:
         *build_pipeline_local_codex_auth_checks(pipeline),
         ],
     )
+    if include_ok_local_checks and _status_value(getattr(report, "status", "ok")) != "failed":
+        report = _extend_doctor_report(
+            report,
+            [
+                *build_pipeline_local_kimi_readiness_info_checks(pipeline),
+                *build_pipeline_local_claude_readiness_info_checks(pipeline),
+                *build_pipeline_local_codex_readiness_info_checks(pipeline),
+                *build_pipeline_local_codex_auth_info_checks(pipeline),
+            ],
+        )
     if _status_value(getattr(report, "status", "ok")) == "failed":
         return report
 

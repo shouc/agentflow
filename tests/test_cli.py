@@ -4135,6 +4135,85 @@ def test_check_local_custom_non_kimi_pipeline_skips_bundled_smoke_prereqs(monkey
     assert captured["wait_run_id"] == "check-local-custom"
 
 
+def test_check_local_custom_kimi_pipeline_reports_successful_local_agent_probes(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="check-local-custom-kimi")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            return _completed_run(run_id, pipeline_name="custom-kimi")
+
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess())
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="codex_plan",
+                agent=SimpleNamespace(value="codex"),
+                provider=None,
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            ),
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            ),
+        ],
+        working_path=Path.cwd(),
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (
+            SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id),
+            FakeOrchestrator(),
+        ),
+    )
+
+    result = runner.invoke(app, ["check-local", "custom-smoke.yaml"])
+
+    assert result.exit_code == 0
+    assert result.stderr == (
+        "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
+        "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; `codex --version` succeeds in the prepared local shell.\n"
+        "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `codex login status` or `OPENAI_API_KEY`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`, claude_review (claude) via `target.shell_init`\n"
+    )
+    assert "Run check-local-custom-kimi: completed" in result.stdout
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "check-local-custom-kimi"
+
+
 def test_smoke_runs_when_bundled_preflight_warns(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -5178,6 +5257,7 @@ def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
@@ -5211,6 +5291,7 @@ def test_doctor_with_pipeline_path_accepts_claude_anthropic_provider_credentials
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
@@ -5350,8 +5431,69 @@ def test_doctor_with_pipeline_path_accepts_local_codex_login_status_from_shell_b
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; `codex --version` succeeds in the prepared local shell.\n"
+        "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `codex login status` or `OPENAI_API_KEY`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
+    )
+
+
+def test_doctor_with_custom_kimi_pipeline_reports_successful_local_agent_probes(monkeypatch):
+    captured: dict[str, object] = {}
+
+    _mock_custom_kimi_preflight(monkeypatch)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess())
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="codex_plan",
+                agent=SimpleNamespace(value="codex"),
+                provider=None,
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            ),
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="kimi",
+                env={},
+                executable=None,
+                target=SimpleNamespace(
+                    kind="local",
+                    shell="bash",
+                    shell_login=True,
+                    shell_interactive=True,
+                    shell_init="kimi",
+                    cwd=None,
+                ),
+            ),
+        ],
+        working_path=Path.cwd(),
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
+        "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; `codex --version` succeeds in the prepared local shell.\n"
+        "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `codex login status` or `OPENAI_API_KEY`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`, claude_review (claude) via `target.shell_init`\n"
     )
 
 
@@ -5458,6 +5600,7 @@ def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_credentials_from
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
@@ -5499,6 +5642,7 @@ def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_env_base_url_cre
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
@@ -6052,6 +6196,11 @@ def test_doctor_with_pipeline_path_reports_auto_preflight_metadata_in_json(monke
         "checks": [
             {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
             {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+            {
+                "name": "claude_ready",
+                "status": "ok",
+                "detail": "Node `review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.",
+            },
         ],
         "pipeline": {
             "auto_preflight": {
@@ -6100,6 +6249,7 @@ nodes:
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
         "- launch_env_override: ok - Node `review`: Launch env uses configured `ANTHROPIC_BASE_URL` value `https://api.kimi.com/coding/` instead of current `https://open.bigmodel.cn/api/anthropic` via `provider.base_url`.\n"
     )
 
@@ -6131,6 +6281,7 @@ nodes:
         "Doctor: ok\n"
         "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.\n"
         "- launch_env_override: ok - Node `review`: Launch env uses configured `ANTHROPIC_BASE_URL` value `https://api.kimi.com/coding/` instead of current `https://open.bigmodel.cn/api/anthropic` via `provider.base_url`.\n"
         "- bootstrap_env_override: ok - Node `review`: Local shell bootstrap overrides current `ANTHROPIC_API_KEY` for this node via `target.bootstrap` (`kimi` helper).\n"
     )
@@ -6166,6 +6317,11 @@ nodes:
     assert payload["checks"] == [
         {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        {
+            "name": "claude_ready",
+            "status": "ok",
+            "detail": "Node `review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.",
+        },
         {
             "name": "launch_env_override",
             "status": "ok",
@@ -6220,6 +6376,11 @@ nodes:
     assert payload["checks"] == [
         {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        {
+            "name": "claude_ready",
+            "status": "ok",
+            "detail": "Node `review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.",
+        },
         {
             "name": "launch_env_override",
             "status": "ok",
