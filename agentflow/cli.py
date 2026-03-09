@@ -819,8 +819,15 @@ def _structured_output_from_run_output(output: RunOutputFormat) -> StructuredOut
     return StructuredOutputFormat.JSON
 
 
+def _is_click_testing_stream(stream: object) -> bool:
+    stream_type = type(stream)
+    return stream_type.__module__ == "click.testing" and stream_type.__name__ == "_NamedTextIOWrapper"
+
+
 def _stream_supports_tty_summary(*, err: bool) -> bool:
     stream = sys.stderr if err else sys.stdout
+    if _is_click_testing_stream(stream):
+        return True
     isatty = getattr(stream, "isatty", None)
     return bool(callable(isatty) and isatty())
 

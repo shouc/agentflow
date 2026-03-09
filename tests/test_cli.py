@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import agentflow.cli
@@ -40,6 +41,26 @@ def _capture_pipeline_loader(captured: dict[str, object], fake_pipeline: object)
         return fake_pipeline
 
     return _load
+
+
+def test_stream_supports_tty_summary_treats_click_testing_streams_as_terminal():
+    probe_app = typer.Typer(add_completion=False)
+
+    @probe_app.command()
+    def probe() -> None:
+        typer.echo(
+            json.dumps(
+                {
+                    "stdout": agentflow.cli._stream_supports_tty_summary(err=False),
+                    "stderr": agentflow.cli._stream_supports_tty_summary(err=True),
+                }
+            )
+        )
+
+    result = runner.invoke(probe_app, [])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"stdout": True, "stderr": True}
 
 
 def _doctor_report(status: str = "ok", detail: str = "ready") -> DoctorReport:
