@@ -287,7 +287,7 @@ def _auth_summary(
     if getattr(target, "kind", None) == "local":
         effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
         shell_init = getattr(target, "shell_init", None)
-        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home, cwd=cwd):
+        if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home, cwd=cwd, env=launch_env):
             explicit_bootstrap_source = ("`target.shell_init`", "target.shell_init")
 
         shell = getattr(target, "shell", None)
@@ -297,6 +297,7 @@ def _auth_summary(
                 api_key_env,
                 home=effective_home,
                 cwd=cwd,
+                env=launch_env,
             )
             or shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env)
         ):
@@ -375,7 +376,7 @@ def _local_bootstrap_auth_override_source(
 
     effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
     shell_init = getattr(target, "shell_init", None)
-    if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home, cwd=cwd):
+    if shell_init_exports_env_var(shell_init, api_key_env, home=effective_home, cwd=cwd, env=launch_env):
         return {"source": "target.shell_init"}
 
     shell = getattr(target, "shell", None)
@@ -384,6 +385,7 @@ def _local_bootstrap_auth_override_source(
         api_key_env,
         home=effective_home,
         cwd=cwd,
+        env=launch_env,
     ) or shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env):
         return {"source": "target.shell"}
 
@@ -475,7 +477,12 @@ def _target_warnings(
     if kimi_bash_warning:
         warnings.append(kimi_bash_warning)
 
-    kimi_warning = kimi_shell_init_requires_interactive_bash_warning(target, home=effective_home, cwd=cwd)
+    kimi_warning = kimi_shell_init_requires_interactive_bash_warning(
+        target,
+        home=effective_home,
+        cwd=cwd,
+        env=launch_env,
+    )
     if kimi_warning:
         warnings.append(kimi_warning)
 
@@ -731,7 +738,7 @@ def _local_bootstrap_sets_env_var(
 
     effective_home = target_bash_home(target, env=env, cwd=cwd)
     shell_init = getattr(target, "shell_init", None)
-    if shell_init_exports_env_var(shell_init, env_var, home=effective_home, cwd=cwd):
+    if shell_init_exports_env_var(shell_init, env_var, home=effective_home, cwd=cwd, env=env):
         return True
 
     shell = getattr(target, "shell", None)
@@ -740,6 +747,7 @@ def _local_bootstrap_sets_env_var(
         env_var,
         home=effective_home,
         cwd=cwd,
+        env=env,
     ):
         return True
     if shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, env_var):

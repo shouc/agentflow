@@ -479,13 +479,13 @@ def _prepared_codex_auth_execution(node: object, pipeline: object | None = None)
         node_target=target,
         create_runtime_dir=False,
     )
-    if kimi_shell_init_requires_bash_warning(target) is not None:
-        return None
-    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir) is not None:
-        return None
-
     provider = resolve_provider(_object_value(node, "provider"), AgentKind.CODEX)
     env = merge_env_layers(_object_value(provider, "env"), _object_value(node, "env"))
+    if kimi_shell_init_requires_bash_warning(target) is not None:
+        return None
+    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir, env=env) is not None:
+        return None
+
     executable = str(_object_value(node, "executable") or "codex")
     prepared = PreparedExecution(
         command=[executable, "login", "status"],
@@ -516,13 +516,13 @@ def _prepared_codex_readiness_execution(
         node_target=target,
         create_runtime_dir=False,
     )
-    if kimi_shell_init_requires_bash_warning(target) is not None:
-        return None
-    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir) is not None:
-        return None
-
     provider = resolve_provider(_object_value(node, "provider"), AgentKind.CODEX)
     env = merge_env_layers(_object_value(provider, "env"), _object_value(node, "env"))
+    if kimi_shell_init_requires_bash_warning(target) is not None:
+        return None
+    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir, env=env) is not None:
+        return None
+
     executable = str(_object_value(node, "executable") or "codex")
     prepared = PreparedExecution(
         command=[executable, "--version"],
@@ -551,9 +551,11 @@ def _should_probe_local_claude(node: object, pipeline: object | None = None) -> 
         node_target=target,
         create_runtime_dir=False,
     )
+    provider = resolve_provider(_object_value(node, "provider"), AgentKind.CLAUDE)
+    env = merge_env_layers(_object_value(provider, "env"), _object_value(node, "env"))
     if kimi_shell_init_requires_bash_warning(target) is not None:
         return False
-    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir) is not None:
+    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir, env=env) is not None:
         return False
     return True
 
@@ -610,13 +612,13 @@ def _prepared_kimi_readiness_execution(
         node_target=target,
         create_runtime_dir=False,
     )
-    if kimi_shell_init_requires_bash_warning(target) is not None:
-        return None
-    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir) is not None:
-        return None
-
     provider = resolve_provider(_object_value(node, "provider"), AgentKind.KIMI)
     env = merge_env_layers(_object_value(provider, "env"), _object_value(node, "env"))
+    if kimi_shell_init_requires_bash_warning(target) is not None:
+        return None
+    if kimi_shell_init_requires_interactive_bash_warning(target, cwd=paths.host_workdir, env=env) is not None:
+        return None
+
     executable = str(_object_value(node, "executable") or default_kimi_executable(paths))
     probe_command = [executable, "-c", "import agentflow.remote.kimi_bridge"]
     prepared = PreparedExecution(

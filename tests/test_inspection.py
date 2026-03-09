@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentflow.inspection import build_launch_inspection, build_launch_inspection_summary
+from agentflow.inspection import build_launch_inspection, build_launch_inspection_summary, render_launch_inspection_summary
 from agentflow.loader import load_pipeline_from_path
 
 
@@ -86,3 +86,4 @@ nodes:
         f"shell=env HOME={custom_home} bash, login=true, startup=~/.profile -> ~/.bashrc, interactive=true"
     )
     assert summary["nodes"][0]["bootstrap_home"] == str(custom_home.resolve())
+    assert f"Bootstrap home: {custom_home.resolve()}" in render_launch_inspection_summary(report)
