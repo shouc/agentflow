@@ -45,7 +45,7 @@ _DEFAULT_DOCTOR_SUBPROCESS_TIMEOUT_SECONDS = 15.0
 _DIAGNOSTIC_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 _ENV_ASSIGNMENT_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _SHELL_COMMAND_BOUNDARY_TOKENS = {"&&", "||", "|", ";", "do", "then", "elif"}
-_COMMAND_POSITION_PREFIX_TOKENS = {"builtin", "command", "env", "nohup", "sudo", "time"}
+_COMMAND_POSITION_PREFIX_TOKENS = {"builtin", "command", "env", "exec", "nohup", "sudo", "time"}
 
 
 def _object_value(obj: object, key: str, default: Any = None) -> Any:

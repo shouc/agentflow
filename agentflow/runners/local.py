@@ -23,6 +23,7 @@ class LocalRunner(Runner):
         "sh",
         "zsh",
     }
+    _SHELL_BUILTIN_PREFIX_TOKENS = {"exec"}
     _INTERACTIVE_SHELL_STDERR_NOISE = (
         "bash: cannot set terminal process group (",
         "bash: initialize_job_control: no job control in background:",
@@ -150,6 +151,12 @@ class LocalRunner(Runner):
     def _replace_shell_template_command(self, shell_parts: list[str], placeholder: str, shell_command: str) -> list[str]:
         return [part.replace(placeholder, shell_command) for part in shell_parts]
 
+    def _normalize_shell_command(self, shell_parts: list[str]) -> list[str]:
+        normalized = list(shell_parts)
+        while normalized and normalized[0] in self._SHELL_BUILTIN_PREFIX_TOKENS:
+            normalized.pop(0)
+        return normalized
+
     def _augment_local_env(self, prepared: PreparedExecution, paths: ExecutionPaths) -> dict[str, str]:
         env = dict(prepared.env)
         if prepared.command[1:3] != ["-m", "agentflow.remote.kimi_bridge"]:
@@ -181,7 +188,7 @@ class LocalRunner(Runner):
 
         if "{command}" in target.shell:
             placeholder = "__AGENTFLOW_COMMAND_PLACEHOLDER__"
-            shell_parts = shlex.split(target.shell.replace("{command}", placeholder))
+            shell_parts = self._normalize_shell_command(shlex.split(target.shell.replace("{command}", placeholder)))
             if not shell_parts:
                 return prepared.command, {}
             shell_parts = self._apply_shell_options(shell_parts, target)
@@ -196,7 +203,8 @@ class LocalRunner(Runner):
             shell_parts = self._replace_shell_template_command(shell_parts, placeholder, shell_command)
             return shell_parts, {"AGENTFLOW_TARGET_COMMAND": command_text}
 
-        shell_parts = self._apply_shell_options(shlex.split(target.shell), target)
+        shell_parts = self._normalize_shell_command(shlex.split(target.shell))
+        shell_parts = self._apply_shell_options(shell_parts, target)
         if not shell_parts:
             return prepared.command, {}
 
