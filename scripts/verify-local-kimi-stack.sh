@@ -24,3 +24,4 @@ run_step() {
 run_step "Shell toolchain" bash "$script_dir/verify-local-kimi-shell.sh"
 run_step "Bundled check-local" "$python_bin" -m agentflow check-local --output summary
 run_step "External custom check-local" bash "$script_dir/verify-custom-local-kimi-pipeline.sh"
+run_step "External custom run" bash "$script_dir/verify-custom-local-kimi-run.sh"

@@ -10,7 +10,7 @@ help:
 	  '  python        Prefer .venv/bin/python when available, else python3' \
 	  '  test          Run the Python test suite' \
 	  '  toolchain-local Verify `bash -lic` + `kimi` still exposes local codex and claude and report bash startup' \
-	  '  verify-local  Run the full local Codex + Claude-on-Kimi verification stack' \
+	  '  verify-local  Run the full local Codex + Claude-on-Kimi verification stack, including external custom run coverage' \
 	  '  check-local-custom Verify a temporary external Codex + Claude-on-Kimi pipeline through `agentflow check-local`' \
 	  '  run-local-custom Verify a temporary external Codex + Claude-on-Kimi pipeline through `agentflow run`' \
 	  '  inspect-local Inspect the bundled local Kimi-backed smoke pipeline' \
