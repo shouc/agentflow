@@ -448,6 +448,19 @@ def _local_codex_auth_ok_check_detail(
     )
 
 
+def _resolved_local_codex_auth_source(
+    returncode: int,
+    *,
+    api_key_env: str,
+    allow_login_status: bool,
+) -> str | None:
+    if returncode == _CODEX_AUTH_VIA_API_KEY_EXIT_CODE:
+        return api_key_env
+    if allow_login_status and returncode == _CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE:
+        return "codex login status"
+    return None
+
+
 def _local_codex_ready_check_detail(node_id: str, executable: str) -> str:
     return (
         f"Node `{node_id}` (codex) cannot launch local Codex after the node shell bootstrap; "
@@ -768,12 +781,15 @@ def _can_authenticate_local_codex(
             exc.command_text,
             exc.timeout_seconds,
         )
+    auth_source = _resolved_local_codex_auth_source(
+        result.returncode,
+        api_key_env=api_key_env,
+        allow_login_status=allow_login_status,
+    )
     if result.returncode == 0:
         return True, None, None
-    if result.returncode == _CODEX_AUTH_VIA_API_KEY_EXIT_CODE:
-        return True, api_key_env, None
-    if allow_login_status and result.returncode == _CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE:
-        return True, "codex login status", None
+    if auth_source is not None:
+        return True, auth_source, None
     return False, None, None
 
 
@@ -1547,10 +1563,12 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
             f"{shlex.quote('claude')} --version >/dev/null 2>&1 || exit {_CLAUDE_AFTER_KIMI_VERSION_FAILED_EXIT_CODE}",
             f"type {shlex.quote('codex')} >/dev/null 2>&1 || exit {_CODEX_AFTER_KIMI_MISSING_EXIT_CODE}",
             f"{shlex.quote('codex')} --version >/dev/null 2>&1 || exit {_CODEX_AFTER_KIMI_VERSION_FAILED_EXIT_CODE}",
+            f'[ -n "${{OPENAI_API_KEY:-}}" ] && exit {_CODEX_AUTH_VIA_API_KEY_EXIT_CODE}',
             (
-                "codex login status >/dev/null 2>&1 || [ -n \"${OPENAI_API_KEY:-}\" ] "
-                f"|| exit {_CODEX_LOGIN_STATUS_AFTER_KIMI_FAILED_EXIT_CODE}"
+                f"{shlex.quote('codex')} login status >/dev/null 2>&1 && exit "
+                f"{_CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE}"
             ),
+            f"exit {_CODEX_LOGIN_STATUS_AFTER_KIMI_FAILED_EXIT_CODE}",
         ]
     )
     try:
@@ -1576,14 +1594,20 @@ def _check_kimi_shell_helper(home: Path | None = None) -> DoctorCheck:
                 f"{_doctor_timeout_detail(exc.command_text, exc.timeout_seconds)}."
             ),
         )
-    if result.returncode == 0:
+    auth_source = _resolved_local_codex_auth_source(
+        result.returncode,
+        api_key_env="OPENAI_API_KEY",
+        allow_login_status=True,
+    )
+    if result.returncode == 0 or auth_source is not None:
         return DoctorCheck(
             name="kimi_shell_helper",
             status="ok",
             detail=(
                 "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
                 f"sets `ANTHROPIC_BASE_URL={_EXPECTED_KIMI_ANTHROPIC_BASE_URL}`, "
-                "keeps both `claude` and `codex` available, and confirms Codex authentication is ready via `codex login status` or `OPENAI_API_KEY` "
+                "keeps both `claude` and `codex` available, and confirms Codex authentication is ready via "
+                f"{_local_codex_auth_ok_sources_detail(api_key_env='OPENAI_API_KEY', allow_login_status=True, source=auth_source)} "
                 "for the bundled smoke pipeline."
             ),
         )

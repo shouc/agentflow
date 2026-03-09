@@ -1678,8 +1678,9 @@ def test_local_smoke_doctor_report_accepts_openai_api_key_when_codex_login_statu
         command = args[0]
         if command[:2] == ["bash", "-lic"]:
             assert "codex --version >/dev/null 2>&1" in command[2]
-            assert 'codex login status >/dev/null 2>&1 || [ -n "${OPENAI_API_KEY:-}" ]' in command[2]
-        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+            assert f'[ -n "${{OPENAI_API_KEY:-}}" ] && exit {_CODEX_AUTH_VIA_API_KEY_EXIT_CODE}' in command[2]
+            assert f"codex login status >/dev/null 2>&1 && exit {_CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE}" in command[2]
+        return subprocess.CompletedProcess(args=command, returncode=_CODEX_AUTH_VIA_API_KEY_EXIT_CODE, stdout="", stderr="")
 
     monkeypatch.setattr("agentflow.doctor.subprocess.run", fake_run)
 
@@ -1692,7 +1693,42 @@ def test_local_smoke_doctor_report_accepts_openai_api_key_when_codex_login_statu
         "detail": (
             "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
             "sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`, keeps both `claude` and `codex` available, "
-            "and confirms Codex authentication is ready via `codex login status` or `OPENAI_API_KEY` for the bundled smoke pipeline."
+            "and confirms Codex authentication is ready via `OPENAI_API_KEY` for the bundled smoke pipeline."
+        ),
+    }
+
+
+def test_local_smoke_doctor_report_accepts_codex_login_status_when_openai_api_key_is_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
+    monkeypatch.setattr(
+        "agentflow.doctor.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=_CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE,
+            stdout="",
+            stderr="",
+        ),
+    )
+
+    report = build_local_smoke_doctor_report(home=home)
+
+    assert report.status == "ok"
+    assert report.as_dict()["checks"][-1] == {
+        "name": "kimi_shell_helper",
+        "status": "ok",
+        "detail": (
+            "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, "
+            "sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`, keeps both `claude` and `codex` available, "
+            "and confirms Codex authentication is ready via `codex login status` for the bundled smoke pipeline."
         ),
     }
 

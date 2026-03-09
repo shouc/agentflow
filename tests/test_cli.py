@@ -4023,7 +4023,7 @@ def test_run_show_preflight_prints_successful_summary_to_stderr(monkeypatch):
         "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; "
         "`codex --version` succeeds in the prepared local shell.\n"
         "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via "
-        "`codex login status` or `OPENAI_API_KEY`.\n"
+        "`OPENAI_API_KEY`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
     )
@@ -5682,7 +5682,7 @@ def test_smoke_show_preflight_reports_pipeline_specific_readiness_for_custom_kim
         "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; "
         "`codex --version` succeeds in the prepared local shell.\n"
         "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via "
-        "`codex login status` or `OPENAI_API_KEY`.\n"
+        "`OPENAI_API_KEY`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
     )
