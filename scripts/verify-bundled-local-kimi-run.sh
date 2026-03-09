@@ -6,7 +6,10 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 . "$script_dir/custom-local-kimi-helpers.sh"
 
 python_bin="$(agentflow_repo_python "$repo_root")"
-bundled_smoke_pipeline="$repo_root/examples/local-real-agents-kimi-smoke.yaml"
+bundled_smoke_pipeline="${AGENTFLOW_BUNDLED_PIPELINE_PATH:-$repo_root/examples/local-real-agents-kimi-smoke.yaml}"
+expected_pipeline_name="${AGENTFLOW_BUNDLED_PIPELINE_NAME:-local-real-agents-kimi-smoke}"
+expected_trigger="${AGENTFLOW_BUNDLED_EXPECTED_TRIGGER:-target.bootstrap}"
+expected_auto_preflight_reason="${AGENTFLOW_BUNDLED_EXPECTED_AUTO_PREFLIGHT_REASON:-path matches the bundled real-agent smoke pipeline.}"
 
 tmpdir="$(mktemp -d)"
 stdout_path="$tmpdir/run.stdout"
@@ -40,7 +43,12 @@ printf "bundled run pipeline path: %s\n" "$bundled_smoke_pipeline"
   agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow run "$bundled_smoke_pipeline" --output json-summary --show-preflight >"$stdout_path" 2>"$stderr_path"
 )
 
-STDOUT_PATH="$stdout_path" STDERR_PATH="$stderr_path" "$python_bin" - <<'PY'
+STDOUT_PATH="$stdout_path" \
+STDERR_PATH="$stderr_path" \
+EXPECTED_PIPELINE_NAME="$expected_pipeline_name" \
+EXPECTED_TRIGGER="$expected_trigger" \
+EXPECTED_AUTO_PREFLIGHT_REASON="$expected_auto_preflight_reason" \
+"$python_bin" - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -49,13 +57,16 @@ stdout_path = Path(os.environ["STDOUT_PATH"])
 stderr_path = Path(os.environ["STDERR_PATH"])
 stdout_text = stdout_path.read_text(encoding="utf-8")
 stderr_text = stderr_path.read_text(encoding="utf-8")
+expected_pipeline_name = os.environ["EXPECTED_PIPELINE_NAME"]
+expected_trigger = os.environ["EXPECTED_TRIGGER"]
+expected_auto_preflight_reason = os.environ["EXPECTED_AUTO_PREFLIGHT_REASON"]
 
 payload = json.loads(stdout_text)
 if payload.get("status") != "completed":
     raise SystemExit(f"Unexpected run status in stdout JSON: {payload}")
 
 pipeline = payload.get("pipeline") or {}
-if pipeline.get("name") != "local-real-agents-kimi-smoke":
+if pipeline.get("name") != expected_pipeline_name:
     raise SystemExit(f"Unexpected pipeline summary in stdout JSON: {payload}")
 
 nodes = {node.get("id"): node for node in payload.get("nodes", [])}
@@ -73,9 +84,15 @@ for node_id, expected_preview in (("codex_plan", "codex ok"), ("claude_review", 
 
 required_stderr_fragments = (
     "Doctor: ok",
-    "- bootstrap_env_override: ok - Node `claude_review`: Local shell bootstrap overrides current `ANTHROPIC_API_KEY` for this node via `target.bootstrap` (`kimi` helper).",
-    "Pipeline auto preflight: enabled - path matches the bundled real-agent smoke pipeline.",
-    "Pipeline auto preflight matches: codex_plan (codex) via `target.bootstrap`, claude_review (claude) via `target.bootstrap`",
+    (
+        "- bootstrap_env_override: ok - Node `claude_review`: Local shell bootstrap overrides current "
+        f"`ANTHROPIC_API_KEY` for this node via `{expected_trigger}` (`kimi` helper)."
+    ),
+    f"Pipeline auto preflight: enabled - {expected_auto_preflight_reason}",
+    (
+        f"Pipeline auto preflight matches: codex_plan (codex) via `{expected_trigger}`, "
+        f"claude_review (claude) via `{expected_trigger}`"
+    ),
 )
 for fragment in required_stderr_fragments:
     if fragment not in stderr_text:

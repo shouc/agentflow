@@ -7,6 +7,8 @@ import textwrap
 import time
 from pathlib import Path
 
+import yaml
+
 
 def _write_executable(path: Path, body: str) -> None:
     path.write_text(f"#!/usr/bin/env bash\nset -euo pipefail\n{body}", encoding="utf-8")
@@ -43,6 +45,17 @@ def _run_script(script_path: Path, *, repo_root: Path, home: Path, **env: str) -
             "HOME": str(home),
             **env,
         },
+        text=True,
+        timeout=5,
+    )
+
+
+def _run_shell(command: str, *, cwd: Path, **env: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", "-lc", command],
+        capture_output=True,
+        cwd=cwd,
+        env={**os.environ, **env},
         text=True,
         timeout=5,
     )
@@ -325,6 +338,85 @@ def test_verify_bundled_local_kimi_run_script_times_out_when_agentflow_hangs(tmp
     assert elapsed < 3
 
 
+def test_verify_bundled_local_kimi_run_script_accepts_shell_wrapper_bundle_overrides(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    run_path = _copy_script(
+        repo_root / "scripts" / "verify-bundled-local-kimi-run.sh",
+        scripts_dir / "verify-bundled-local-kimi-run.sh",
+    )
+    _copy_script(
+        repo_root / "scripts" / "custom-local-kimi-helpers.sh",
+        scripts_dir / "custom-local-kimi-helpers.sh",
+    )
+    fake_pythonpath = _write_fake_agentflow_module(
+        tmp_path / "fake-pythonpath",
+        """
+        from __future__ import annotations
+
+        import json
+        import sys
+
+        if len(sys.argv) > 2 and sys.argv[1] == "run":
+            payload = {
+                "status": "completed",
+                "pipeline": {"name": "local-real-agents-kimi-shell-wrapper-smoke"},
+                "nodes": [
+                    {"id": "codex_plan", "status": "completed", "preview": "codex ok"},
+                    {"id": "claude_review", "status": "completed", "preview": "claude ok"},
+                ],
+            }
+            print(json.dumps(payload), flush=True)
+            print("Doctor: ok", file=sys.stderr, flush=True)
+            print(
+                "- bootstrap_env_override: ok - Node `claude_review`: Local shell bootstrap overrides "
+                "current `ANTHROPIC_API_KEY` for this node via `target.shell` (`kimi` helper).",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                "Pipeline auto preflight matches: codex_plan (codex) via `target.shell`, "
+                "claude_review (claude) via `target.shell`",
+                file=sys.stderr,
+                flush=True,
+            )
+        """,
+    )
+
+    bundled_wrapper_pipeline = tmp_path / "examples" / "local-real-agents-kimi-shell-wrapper-smoke.yaml"
+
+    completed = subprocess.run(
+        ["bash", str(run_path)],
+        capture_output=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "AGENTFLOW_PYTHON": sys.executable,
+            "PYTHONPATH": str(fake_pythonpath),
+            "AGENTFLOW_BUNDLED_PIPELINE_PATH": str(bundled_wrapper_pipeline),
+            "AGENTFLOW_BUNDLED_PIPELINE_NAME": "local-real-agents-kimi-shell-wrapper-smoke",
+            "AGENTFLOW_BUNDLED_EXPECTED_TRIGGER": "target.shell",
+            "AGENTFLOW_BUNDLED_EXPECTED_AUTO_PREFLIGHT_REASON": (
+                "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap."
+            ),
+        },
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0
+    assert f"bundled run pipeline path: {bundled_wrapper_pipeline}" in completed.stdout
+    assert "validated bundled agentflow run json-summary stdout and preflight stderr" in completed.stdout
+    assert completed.stderr == ""
+
+
 def test_verify_custom_local_kimi_pipeline_script_reports_success(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     scripts_dir = tmp_path / "scripts"
@@ -410,6 +502,39 @@ def test_verify_custom_local_kimi_pipeline_script_reports_success(tmp_path: Path
     assert "custom pipeline path:" in completed.stdout
     assert "validated agentflow check-local json-summary stdout and preflight stderr" in completed.stdout
     assert completed.stderr == ""
+
+
+def test_custom_local_kimi_pipeline_writers_match_bundled_examples(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    helpers_path = repo_root / "scripts" / "custom-local-kimi-helpers.sh"
+    bundled_examples = {
+        "bootstrap": repo_root / "examples" / "local-real-agents-kimi-smoke.yaml",
+        "shell-init": repo_root / "examples" / "local-real-agents-kimi-shell-init-smoke.yaml",
+        "shell-wrapper": repo_root / "examples" / "local-real-agents-kimi-shell-wrapper-smoke.yaml",
+    }
+    writers = {
+        "bootstrap": "write_custom_local_kimi_pipeline",
+        "shell-init": "write_custom_local_kimi_shell_init_pipeline",
+        "shell-wrapper": "write_custom_local_kimi_shell_wrapper_pipeline",
+    }
+
+    for mode, example_path in bundled_examples.items():
+        output_path = tmp_path / f"{mode}.yaml"
+        completed = _run_shell(
+            f'source "{helpers_path}" && {writers[mode]} "{output_path}" "{mode}-name" "{mode}-description"',
+            cwd=tmp_path,
+            AGENTFLOW_PYTHON=_repo_python(repo_root),
+        )
+        assert completed.returncode == 0, completed.stderr
+
+        generated = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+        bundled = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+        assert generated.pop("name") == f"{mode}-name"
+        assert generated.pop("description") == f"{mode}-description"
+        bundled.pop("name")
+        bundled.pop("description")
+        assert generated == bundled
 
 
 def test_verify_local_kimi_stack_script_runs_steps_in_expected_order(tmp_path: Path) -> None:
