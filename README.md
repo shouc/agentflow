@@ -293,7 +293,7 @@ nodes:
 
 AgentFlow applies `local_target_defaults` to local nodes that omit `target`, merges it into local nodes that only override part of `target`, and leaves container or Lambda targets unchanged. If you prefer to spell the wrapper directly, explicit shells such as `bash -lic` behave the same way, and AgentFlow suppresses Bash's harmless no-job-control stderr noise for those interactive wrappers too. If your login shell uses `~/.bash_profile`, make sure it eventually reaches `~/.bashrc`, either directly or via another startup file such as `~/.profile`; otherwise Bash only reads `~/.profile` when no `~/.bash_profile` or `~/.bash_login` file is present. A minimal bridge looks like:
 
-If one local node should not inherit the shared Kimi preset, set `target.bootstrap: null` on that node. AgentFlow now treats that as an explicit opt-out from the inherited bootstrap while still preserving unrelated local defaults such as `cwd`.
+If one local node should not inherit the shared Kimi preset, set `target.bootstrap: null` on that node. AgentFlow now treats that as an explicit opt-out from the inherited bootstrap while still preserving unrelated local defaults such as `cwd`. That opt-out also drops inherited shell bootstrap fields such as `shell`, `shell_login`, `shell_interactive`, and any shared `shell_init` commands, including extra commands that were prepended to the shared Kimi bootstrap.
 
 ```yaml
 local_target_defaults:
