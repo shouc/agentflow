@@ -679,6 +679,8 @@ def _structured_output_from_run_output(output: RunOutputFormat) -> StructuredOut
     resolved_output = _resolve_run_output(output, err=True)
     if resolved_output == RunOutputFormat.SUMMARY:
         return StructuredOutputFormat.SUMMARY
+    if resolved_output == RunOutputFormat.JSON_SUMMARY:
+        return StructuredOutputFormat.JSON_SUMMARY
     return StructuredOutputFormat.JSON
 
 
@@ -1346,6 +1348,39 @@ def _build_doctor_payload(
     return payload
 
 
+def _build_doctor_summary_payload(
+    report: object,
+    *,
+    include_shell_bridge: bool = False,
+    shell_bridge: object | None = None,
+    pipeline: dict[str, object] | None = None,
+) -> dict[str, object]:
+    counts = {"ok": 0, "warning": 0, "failed": 0}
+    checks = []
+    for check in getattr(report, "checks", []) or []:
+        status = _status_value(getattr(check, "status", "unknown"))
+        if status in counts:
+            counts[status] += 1
+        checks.append(
+            {
+                "name": getattr(check, "name", "unknown"),
+                "status": status,
+                "detail": getattr(check, "detail", ""),
+            }
+        )
+
+    payload: dict[str, object] = {
+        "status": _status_value(getattr(report, "status", "unknown")),
+        "counts": counts,
+        "checks": checks,
+    }
+    if pipeline is not None:
+        payload["pipeline"] = dict(pipeline)
+    if include_shell_bridge:
+        payload["shell_bridge"] = None if shell_bridge is None else shell_bridge.as_dict()
+    return payload
+
+
 def _echo_doctor_report(
     report: object,
     *,
@@ -1367,14 +1402,24 @@ def _echo_doctor_report(
             err=err,
         )
         return
+    payload = (
+        _build_doctor_summary_payload(
+            report,
+            include_shell_bridge=include_shell_bridge,
+            shell_bridge=shell_bridge,
+            pipeline=pipeline,
+        )
+        if resolved_output == StructuredOutputFormat.JSON_SUMMARY
+        else _build_doctor_payload(
+            report,
+            include_shell_bridge=include_shell_bridge,
+            shell_bridge=shell_bridge,
+            pipeline=pipeline,
+        )
+    )
     typer.echo(
         json.dumps(
-            _build_doctor_payload(
-                report,
-                include_shell_bridge=include_shell_bridge,
-                shell_bridge=shell_bridge,
-                pipeline=pipeline,
-            ),
+            payload,
             indent=2,
         ),
         err=err,

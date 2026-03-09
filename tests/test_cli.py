@@ -4271,6 +4271,109 @@ def test_check_local_uses_json_doctor_output_when_run_output_is_json(monkeypatch
     assert json.loads(result.stdout) == {"id": "check-local-json", "status": "completed"}
 
 
+def test_check_local_uses_json_summary_doctor_output_when_run_output_is_json_summary(monkeypatch):
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            return SimpleNamespace(id="check-local-json-summary")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            return _completed_run(
+                run_id,
+                pipeline_name="local-real-agents-kimi-smoke",
+                pipeline_nodes=[
+                    SimpleNamespace(
+                        id="codex_plan",
+                        agent=SimpleNamespace(value="codex"),
+                        model="gpt-5-codex",
+                        provider=None,
+                    )
+                ],
+                nodes={
+                    "codex_plan": SimpleNamespace(
+                        status=SimpleNamespace(value="completed"),
+                        current_attempt=1,
+                        attempts=[SimpleNamespace(number=1)],
+                        exit_code=0,
+                        final_response="codex ok",
+                        output="codex ok",
+                        stderr_lines=[],
+                    )
+                },
+            )
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="warning",
+            checks=[
+                DoctorCheck(
+                    name="bash_login_startup",
+                    status="warning",
+                    detail="missing bridge",
+                    context=_bash_startup_context("~/.profile -> ~/.bashrc"),
+                ),
+                DoctorCheck(
+                    name="kimi_shell_helper",
+                    status="ok",
+                    detail="ready",
+                    context={"path": "/tmp/kimi"},
+                ),
+            ],
+        ),
+    )
+    monkeypatch.setattr(agentflow.cli, "build_bash_login_shell_bridge_recommendation", _shell_bridge_recommendation)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: "examples/local-real-agents-kimi-smoke.yaml")
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: object())
+
+    result = runner.invoke(app, ["check-local", "--output", "json-summary", "--shell-bridge"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stderr) == {
+        "status": "warning",
+        "counts": {"ok": 1, "warning": 1, "failed": 0},
+        "checks": [
+            {"name": "bash_login_startup", "status": "warning", "detail": "missing bridge"},
+            {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        ],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": "path matches the bundled real-agent smoke pipeline.",
+                "matches": [],
+                "match_summary": [],
+            }
+        },
+        "shell_bridge": _shell_bridge_recommendation().as_dict(),
+    }
+    assert json.loads(result.stdout) == {
+        "id": "check-local-json-summary",
+        "status": "completed",
+        "pipeline": {"name": "local-real-agents-kimi-smoke"},
+        "started_at": "2026-03-08T04:11:03+00:00",
+        "finished_at": "2026-03-08T04:11:10+00:00",
+        "duration": "7.0s",
+        "duration_seconds": 7.0,
+        "run_dir": ".agentflow/runs/check-local-json-summary",
+        "nodes": [
+            {
+                "id": "codex_plan",
+                "status": "completed",
+                "agent": "codex",
+                "model": "gpt-5-codex",
+                "attempts": 1,
+                "exit_code": 0,
+                "preview": "codex ok",
+            }
+        ],
+    }
+
+
 def test_check_local_stops_when_doctor_fails(monkeypatch):
     bundled_path = str((Path.cwd() / "examples/local-real-agents-kimi-smoke.yaml").resolve())
 
@@ -5288,6 +5391,43 @@ def test_doctor_outputs_json_report(monkeypatch):
     assert json.loads(result.stdout) == {
         "status": "ok",
         "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+    }
+
+
+def test_doctor_outputs_json_summary_report(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="warning",
+            checks=[
+                DoctorCheck(
+                    name="bash_login_startup",
+                    status="warning",
+                    detail="missing bridge",
+                    context=_bash_startup_context("~/.profile -> ~/.bashrc"),
+                ),
+                DoctorCheck(
+                    name="kimi_shell_helper",
+                    status="ok",
+                    detail="ready",
+                    context={"path": "/tmp/kimi"},
+                ),
+            ],
+        ),
+    )
+
+    result = runner.invoke(app, ["doctor", "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "status": "warning",
+        "counts": {"ok": 1, "warning": 1, "failed": 0},
+        "checks": [
+            {"name": "bash_login_startup", "status": "warning", "detail": "missing bridge"},
+            {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        ],
     }
 
 
@@ -6775,6 +6915,7 @@ def test_doctor_with_pipeline_path_supports_json_summary_output(monkeypatch):
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert json.loads(result.stdout) == {
         "status": "ok",
+        "counts": {"ok": 0, "warning": 0, "failed": 0},
         "checks": [],
         "pipeline": {
             "auto_preflight": {
