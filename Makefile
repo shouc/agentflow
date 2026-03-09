@@ -10,7 +10,7 @@ help:
 	  '  python        Print the Python interpreter used by repo shortcuts (.venv/bin/python when available, else python3)' \
 	  '  test          Run the Python test suite' \
 	  '  toolchain-local Run `agentflow toolchain-local --output summary` for the local bash/Kimi/Codex/Claude readiness check' \
-	  '  verify-local  Run the full local Codex + Claude-on-Kimi verification stack across bundled toolchain-local/inspect-local/doctor-local/smoke-local/run-local/check-local plus external custom doctor, inspect, check-local, and run paths (shared timeout via AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS)' \
+	  '  verify-local  Run the full local Codex + Claude-on-Kimi verification stack across bundled bootstrap/shell_init/target.shell inspect/doctor/smoke/run coverage, bundled toolchain-local/check-local, plus external custom doctor, inspect, check-local, and run paths (shared timeout via AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS)' \
 	  '  doctor-local-custom Verify a temporary external Codex + Claude-on-Kimi pipeline through `agentflow doctor`' \
 	  '  doctor-local-custom-shell-init Verify a temporary external Codex + Claude-on-Kimi `shell_init: kimi` pipeline through `agentflow doctor`' \
 	  '  doctor-local-custom-shell-wrapper Verify a temporary external Codex + Claude-on-Kimi `target.shell` wrapper pipeline through `agentflow doctor`' \

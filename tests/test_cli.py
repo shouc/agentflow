@@ -298,6 +298,15 @@ def test_init_command_prints_local_kimi_smoke_template():
     assert "provider: kimi" in result.stdout
 
 
+def test_init_command_prints_local_kimi_shell_init_smoke_template():
+    result = runner.invoke(app, ["init", "--template", "local-kimi-shell-init-smoke"])
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("name: local-real-agents-kimi-shell-init-smoke\n")
+    assert "shell_init: kimi" in result.stdout
+    assert "provider: kimi" in result.stdout
+
+
 def test_init_command_prints_local_kimi_shell_wrapper_smoke_template():
     result = runner.invoke(app, ["init", "--template", "local-kimi-shell-wrapper-smoke"])
 
