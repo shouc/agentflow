@@ -196,6 +196,25 @@ def _env_declares_key(env: object, key: str) -> bool:
     return isinstance(env, dict) and key in env
 
 
+def _bootstrap_override_origin(
+    launch_env: dict[str, str],
+    key: str,
+) -> tuple[str | None, str]:
+    current_value = str(os.getenv(key, "") or "")
+    launch_value = str(launch_env.get(key, "") or "")
+    if key in launch_env and launch_value.strip() and (not current_value.strip() or launch_value != current_value):
+        return "launch_env", launch_value
+    if current_value.strip():
+        return "current_environment", current_value
+    return None, ""
+
+
+def _effective_bootstrap_base_url(launch_env: dict[str, str]) -> str:
+    if "ANTHROPIC_BASE_URL" in launch_env:
+        return str(launch_env.get("ANTHROPIC_BASE_URL", "") or "")
+    return str(os.getenv("ANTHROPIC_BASE_URL", "") or "")
+
+
 def _local_launch_env(node: NodeSpec, resolved_provider: object) -> dict[str, str]:
     env: dict[str, str] = {}
     provider_env = getattr(resolved_provider, "env", None)
@@ -625,6 +644,7 @@ def _format_bootstrap_env_override_detail(detail: dict[str, Any]) -> str:
     key = str(detail["key"])
     source_label = _bootstrap_env_override_source_label(detail)
     source_suffix = f" via {source_label}" if source_label else ""
+    subject = "launch" if detail.get("origin") == "launch_env" else "current"
     if not detail.get("redacted"):
         current_value = str(detail.get("current_value", ""))
         bootstrap_value = str(detail.get("bootstrap_value", ""))
@@ -636,7 +656,7 @@ def _format_bootstrap_env_override_detail(detail: dict[str, Any]) -> str:
             f"Local shell bootstrap overrides {subject} `{key}` from `{current_value}` "
             f"to `{bootstrap_value}`{source_suffix}."
         )
-    return f"Local shell bootstrap overrides current `{key}` for this node{source_suffix}."
+    return f"Local shell bootstrap overrides {subject} `{key}` for this node{source_suffix}."
 
 
 def _launch_env_override_source(node: NodeSpec, resolved_provider: Any, key: str) -> dict[str, str] | None:
@@ -716,8 +736,8 @@ def _bootstrap_env_override_details(
     details: list[dict[str, Any]] = []
     api_key_env, _provider_name = _resolved_auth_requirement(node)
     if api_key_env:
-        current_value = str(os.getenv(api_key_env, "") or "").strip()
-        if current_value:
+        origin, pre_bootstrap_value = _bootstrap_override_origin(launch_env, api_key_env)
+        if origin is not None and pre_bootstrap_value.strip():
             source = _local_bootstrap_auth_override_source(
                 node,
                 resolved_provider,
@@ -727,21 +747,32 @@ def _bootstrap_env_override_details(
             )
             if source is not None:
                 if api_key_env == "ANTHROPIC_API_KEY":
-                    base_url_overridden = any(
-                        str(detail.get("key") or "") == "ANTHROPIC_BASE_URL"
-                        for detail in _launch_env_override_details(node, resolved_provider, launch_env)
-                    )
-                    current_base_url = str(os.getenv("ANTHROPIC_BASE_URL", "") or "").strip().rstrip("/")
-                    kimi_base_url = _KIMI_ANTHROPIC_BASE_URL.rstrip("/")
-                    if source.get("helper") == "kimi":
-                        if not base_url_overridden and current_base_url != kimi_base_url:
+                    if origin == "launch_env":
+                        effective_base_url = _effective_bootstrap_base_url(launch_env).strip().rstrip("/")
+                        kimi_base_url = _KIMI_ANTHROPIC_BASE_URL.rstrip("/")
+                        if source.get("helper") == "kimi":
+                            if effective_base_url != kimi_base_url:
+                                source = None
+                        elif not effective_base_url:
                             source = None
-                    elif not base_url_overridden:
-                        source = None
+                    else:
+                        base_url_overridden = any(
+                            str(detail.get("key") or "") == "ANTHROPIC_BASE_URL"
+                            for detail in _launch_env_override_details(node, resolved_provider, launch_env)
+                        )
+                        current_base_url = str(os.getenv("ANTHROPIC_BASE_URL", "") or "").strip().rstrip("/")
+                        kimi_base_url = _KIMI_ANTHROPIC_BASE_URL.rstrip("/")
+                        if source.get("helper") == "kimi":
+                            if not base_url_overridden and current_base_url != kimi_base_url:
+                                source = None
+                        elif not base_url_overridden:
+                            source = None
                 if source is not None:
                     detail: dict[str, Any] = {"key": api_key_env}
                     if looks_sensitive_key(api_key_env):
                         detail["redacted"] = True
+                    if origin == "launch_env":
+                        detail["origin"] = origin
                     detail.update(source)
                     details.append(detail)
 

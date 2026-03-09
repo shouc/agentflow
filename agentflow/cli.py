@@ -610,7 +610,8 @@ def _pipeline_bootstrap_env_override_checks(nodes: list[dict[str, object]]) -> l
             elif not isinstance(source, str) or not source:
                 source_label = ""
 
-            detail = f"Node `{node_id}`: Local shell bootstrap overrides current `{key}` for this node{source_label}."
+            subject = "launch" if override.get("origin") == "launch_env" else "current"
+            detail = f"Node `{node_id}`: Local shell bootstrap overrides {subject} `{key}` for this node{source_label}."
             if not override.get("redacted"):
                 current_value = override.get("current_value")
                 bootstrap_value = override.get("bootstrap_value")

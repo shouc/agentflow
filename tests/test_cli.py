@@ -1364,6 +1364,45 @@ nodes:
     ]
 
 
+def test_inspect_command_summary_reports_bootstrap_auth_override_for_launch_secret(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-bootstrap-auth-override-launch-secret
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: kimi
+    prompt: hi
+    env:
+      ANTHROPIC_API_KEY: launch-secret
+    target:
+      kind: local
+      bootstrap: kimi
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["bootstrap_env_overrides"] == [
+        {
+            "key": "ANTHROPIC_API_KEY",
+            "redacted": True,
+            "origin": "launch_env",
+            "source": "target.bootstrap",
+            "helper": "kimi",
+        }
+    ]
+    assert payload["nodes"][0]["warnings"] == [
+        "Local shell bootstrap overrides launch `ANTHROPIC_API_KEY` for this node via `target.bootstrap` (`kimi` helper)."
+    ]
+
+
 def test_inspect_command_redacts_inline_shell_bootstrap_secrets(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -7433,6 +7472,56 @@ nodes:
                 "node_id": "review",
                 "key": "ANTHROPIC_API_KEY",
                 "redacted": True,
+                "source": "target.bootstrap",
+                "helper": "kimi",
+            },
+        },
+    ]
+
+
+def test_doctor_with_pipeline_path_reports_bootstrap_auth_override_for_launch_secret(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: doctor-bootstrap-auth-override-launch-secret
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: kimi
+    prompt: hi
+    env:
+      ANTHROPIC_API_KEY: launch-secret
+    target:
+      kind: local
+      bootstrap: kimi
+""",
+        encoding="utf-8",
+    )
+    _mock_custom_kimi_preflight(monkeypatch)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+    result = runner.invoke(app, ["doctor", str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
+        {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        {
+            "name": "claude_ready",
+            "status": "ok",
+            "detail": "Node `review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.",
+        },
+        {
+            "name": "bootstrap_env_override",
+            "status": "ok",
+            "detail": "Node `review`: Local shell bootstrap overrides launch `ANTHROPIC_API_KEY` for this node via `target.bootstrap` (`kimi` helper).",
+            "context": {
+                "node_id": "review",
+                "key": "ANTHROPIC_API_KEY",
+                "redacted": True,
+                "origin": "launch_env",
                 "source": "target.bootstrap",
                 "helper": "kimi",
             },
