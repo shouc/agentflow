@@ -27,6 +27,11 @@ _BUNDLED_TEMPLATES = (
         example_name="local-real-agents-kimi-shell-init-smoke.yaml",
         description="Local Codex plus Claude-on-Kimi smoke DAG using explicit `shell_init: kimi`.",
     ),
+    BundledTemplate(
+        name="local-kimi-shell-wrapper-smoke",
+        example_name="local-real-agents-kimi-shell-wrapper-smoke.yaml",
+        description="Local Codex plus Claude-on-Kimi smoke DAG using an explicit `target.shell` Kimi wrapper.",
+    ),
 )
 
 _BUNDLED_TEMPLATE_FILES = {template.name: template.example_name for template in _BUNDLED_TEMPLATES}

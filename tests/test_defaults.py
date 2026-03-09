@@ -20,6 +20,8 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert "bootstrap: kimi" in by_name["local-kimi-smoke"].description
     assert by_name["local-kimi-shell-init-smoke"].example_name == "local-real-agents-kimi-shell-init-smoke.yaml"
     assert "shell_init: kimi" in by_name["local-kimi-shell-init-smoke"].description
+    assert by_name["local-kimi-shell-wrapper-smoke"].example_name == "local-real-agents-kimi-shell-wrapper-smoke.yaml"
+    assert "target.shell" in by_name["local-kimi-shell-wrapper-smoke"].description
 
 
 def test_bundled_smoke_pipeline_runs_both_agents_in_shared_kimi_bootstrap():
@@ -62,4 +64,30 @@ def test_bundled_shell_init_smoke_pipeline_runs_both_agents_in_explicit_shell_in
     assert codex_node.depends_on == []
     assert claude_node.target.bootstrap is None
     assert claude_node.target.shell_init == "kimi"
+    assert claude_node.depends_on == []
+
+
+def test_bundled_shell_wrapper_smoke_template_is_available():
+    assert "local-kimi-shell-wrapper-smoke" in bundled_template_names()
+    assert load_bundled_template_yaml("local-kimi-shell-wrapper-smoke").startswith(
+        "name: local-real-agents-kimi-shell-wrapper-smoke\n"
+    )
+
+
+def test_bundled_shell_wrapper_smoke_pipeline_runs_both_agents_in_explicit_shell_wrapper_mode():
+    pipeline = load_pipeline_from_path(str(bundled_template_path("local-kimi-shell-wrapper-smoke")))
+    codex_node = next(node for node in pipeline.nodes if node.id == "codex_plan")
+    claude_node = next(node for node in pipeline.nodes if node.id == "claude_review")
+
+    assert pipeline.concurrency == 2
+    assert codex_node.target.kind == "local"
+    assert codex_node.target.bootstrap is None
+    assert codex_node.target.shell == "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"
+    assert codex_node.target.shell_login is False
+    assert codex_node.target.shell_interactive is False
+    assert codex_node.target.shell_init is None
+    assert codex_node.depends_on == []
+    assert claude_node.target.bootstrap is None
+    assert claude_node.target.shell == "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"
+    assert claude_node.target.shell_init is None
     assert claude_node.depends_on == []

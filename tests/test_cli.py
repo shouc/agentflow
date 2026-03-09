@@ -297,6 +297,15 @@ def test_init_command_prints_local_kimi_smoke_template():
     assert "provider: kimi" in result.stdout
 
 
+def test_init_command_prints_local_kimi_shell_wrapper_smoke_template():
+    result = runner.invoke(app, ["init", "--template", "local-kimi-shell-wrapper-smoke"])
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("name: local-real-agents-kimi-shell-wrapper-smoke\n")
+    assert "shell: \"bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'\"" in result.stdout
+    assert "provider: kimi" in result.stdout
+
+
 def test_templates_command_lists_bundled_templates():
     result = runner.invoke(app, ["templates"])
 
@@ -309,6 +318,8 @@ def test_templates_command_lists_bundled_templates():
         "(source: `examples/local-real-agents-kimi-smoke.yaml`, use: `agentflow init --template local-kimi-smoke`)\n"
         "- local-kimi-shell-init-smoke: Local Codex plus Claude-on-Kimi smoke DAG using explicit `shell_init: kimi`. "
         "(source: `examples/local-real-agents-kimi-shell-init-smoke.yaml`, use: `agentflow init --template local-kimi-shell-init-smoke`)\n"
+        "- local-kimi-shell-wrapper-smoke: Local Codex plus Claude-on-Kimi smoke DAG using an explicit `target.shell` Kimi wrapper. "
+        "(source: `examples/local-real-agents-kimi-shell-wrapper-smoke.yaml`, use: `agentflow init --template local-kimi-shell-wrapper-smoke`)\n"
     )
 
 
