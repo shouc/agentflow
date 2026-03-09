@@ -6928,6 +6928,7 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_interactive
 
 def test_doctor_with_pipeline_path_accepts_kimi_api_key_from_node_env(monkeypatch):
     captured: dict[str, object] = {}
+    expected_python = sys.executable
 
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
     monkeypatch.setattr(subprocess, "run", _completed_subprocess())
@@ -6951,6 +6952,8 @@ def test_doctor_with_pipeline_path_accepts_kimi_api_key_from_node_env(monkeypatc
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
+        "- kimi_ready: ok - Node `kimi_review` (kimi) can launch the local Kimi bridge after the node shell bootstrap; "
+        f"`{expected_python} -c 'import agentflow.remote.kimi_bridge'` succeeds in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Kimi-backed nodes require pipeline-specific readiness checks.\n"
         "Pipeline auto preflight matches: kimi_review (kimi) via `agent`\n"
     )
