@@ -14,6 +14,7 @@ from agentflow.local_shell import (
     shell_init_exports_env_var,
     shell_init_uses_kimi_helper,
     summarize_target_bash_login_startup,
+    target_uses_bash,
     shell_template_exports_env_var_before_command,
     target_bash_home,
     target_bash_login_startup_file,
@@ -433,6 +434,26 @@ def _bootstrap_summary(
     return ", ".join(parts)
 
 
+def _bootstrap_home(
+    target: dict[str, Any],
+    launch_env: dict[str, str] | None = None,
+    *,
+    cwd: str | None = None,
+) -> str | None:
+    if target.get("kind") != "local" or not target_uses_bash(target):
+        return None
+
+    effective_home = target_bash_home(target, env=launch_env, cwd=cwd).resolve()
+    try:
+        process_home = Path.home().resolve()
+    except RuntimeError:
+        process_home = None
+
+    if process_home is not None and effective_home == process_home:
+        return None
+    return str(effective_home)
+
+
 def _target_warnings(
     target: dict[str, Any],
     launch_env: dict[str, str] | None = None,
@@ -470,10 +491,9 @@ def _launch_env_override_warning(key: str, current_value: str, launch_value: str
             return f"Launch env overrides current `{key}` from `{current_value}` to `{launch_value}`."
         return f"Launch env clears current `{key}` value `{current_value}`."
 
-    if not launch_value.strip():
-        return None
-
     if key.endswith("_CUSTOM_HEADERS") or looks_sensitive_key(key):
+        if not launch_value.strip():
+            return f"Launch env clears current `{key}` for this node."
         return f"Launch env overrides current `{key}` for this node."
 
     return None
@@ -512,6 +532,8 @@ def _format_launch_env_override_detail(detail: dict[str, Any]) -> str:
     source_suffix = f" via {source_label}" if source_label else ""
 
     if detail.get("redacted"):
+        if detail.get("cleared"):
+            return f"Launch env clears current `{key}` for this node{source_suffix}."
         return f"Launch env overrides current `{key}` for this node{source_suffix}."
 
     current_value = str(detail.get("current_value", ""))
@@ -590,6 +612,8 @@ def _launch_env_override_details(
             detail["launch_value"] = str(launch_value)
         else:
             detail["redacted"] = True
+            if not str(launch_value).strip():
+                detail["cleared"] = True
         source = _launch_env_override_source(node, resolved_provider, key)
         if source:
             detail.update(source)
@@ -877,6 +901,9 @@ def build_launch_inspection(
         bootstrap_summary = _bootstrap_summary(node_plan["target"], prepared.env, cwd=prepared.cwd)
         if bootstrap_summary:
             node_plan["bootstrap"] = bootstrap_summary
+        bootstrap_home = _bootstrap_home(node_plan["target"], prepared.env, cwd=prepared.cwd)
+        if bootstrap_home:
+            node_plan["bootstrap_home"] = bootstrap_home
         launch_env_overrides = _launch_env_override_details(node, resolved_provider, prepared.env)
         if launch_env_overrides:
             node_plan["launch_env_overrides"] = launch_env_overrides
@@ -980,6 +1007,9 @@ def build_launch_inspection_summary(report: dict[str, Any]) -> dict[str, Any]:
         bootstrap_summary = node.get("bootstrap")
         if bootstrap_summary:
             node_summary["bootstrap"] = bootstrap_summary
+        bootstrap_home = node.get("bootstrap_home")
+        if bootstrap_home:
+            node_summary["bootstrap_home"] = bootstrap_home
         prompt_preview = node.get("rendered_prompt_preview")
         if prompt_preview:
             node_summary["prompt_preview"] = prompt_preview
@@ -1057,6 +1087,9 @@ def render_launch_inspection_summary(report: dict[str, Any]) -> str:
         bootstrap_summary = node.get("bootstrap")
         if bootstrap_summary:
             lines.append(f"  Bootstrap: {bootstrap_summary}")
+        bootstrap_home = node.get("bootstrap_home")
+        if bootstrap_home:
+            lines.append(f"  Bootstrap home: {bootstrap_home}")
         prompt_preview = node.get("rendered_prompt_preview")
         if prompt_preview:
             lines.append(f"  Prompt: {prompt_preview}")

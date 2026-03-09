@@ -1579,6 +1579,37 @@ nodes:
     assert payload["nodes"][0]["bootstrap"] == "shell=bash, login=true, startup=~/.profile"
 
 
+def test_inspect_command_summary_reports_effective_bootstrap_home_when_target_overrides_home(tmp_path, monkeypatch):
+    process_home = tmp_path / "process-home"
+    process_home.mkdir()
+    custom_home = tmp_path / "custom-home"
+    custom_home.mkdir()
+    (custom_home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (custom_home / ".bashrc").write_text("export OPENAI_API_KEY=test-shell-key\n", encoding="utf-8")
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        f"""name: inspect-custom-home-summary
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    prompt: hi
+    target:
+      kind: local
+      shell: env HOME={custom_home} bash
+      shell_login: true
+      shell_interactive: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(process_home))
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert f"Bootstrap home: {custom_home.resolve()}" in result.stdout
+
+
 def test_inspect_command_summary_reports_default_claude_auth_requirement_without_explicit_provider(tmp_path, monkeypatch):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
@@ -6118,6 +6149,82 @@ def test_doctor_with_pipeline_path_requires_default_claude_credentials_without_e
         "Doctor: failed\n"
         "- provider_credentials: failed - Node `claude_review` (claude) requires `ANTHROPIC_API_KEY` for provider "
         "`anthropic`, but it is not set in the current environment, `node.env`, or `provider.env`.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_fails_when_node_env_clears_current_provider_api_key(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-anthropic-key")
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="claude_review",
+                agent=SimpleNamespace(value="claude"),
+                provider="anthropic",
+                env={"ANTHROPIC_API_KEY": ""},
+                executable=None,
+                target=SimpleNamespace(kind="local"),
+            )
+        ],
+        working_path=Path.cwd(),
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 1
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: failed\n"
+        "- provider_credentials: failed - Node `claude_review` (claude) requires `ANTHROPIC_API_KEY` for provider "
+        "`anthropic`, but it is not set in the current environment, `node.env`, or `provider.env`.\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local "
+        "Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_reports_when_launch_env_clears_current_provider_api_key_before_kimi_bootstrap(
+    tmp_path,
+    monkeypatch,
+):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: doctor-kimi-bootstrap-key-clear
+working_dir: .
+nodes:
+  - id: claude_review
+    agent: claude
+    provider: kimi
+    prompt: hi
+    env:
+      ANTHROPIC_API_KEY: ""
+    target:
+      kind: local
+      shell: bash
+      shell_init: kimi
+      shell_interactive: true
+""",
+        encoding="utf-8",
+    )
+    _mock_custom_kimi_preflight(monkeypatch)
+    monkeypatch.setattr(subprocess, "run", _completed_subprocess())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-anthropic-key")
+
+    result = runner.invoke(app, ["doctor", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell "
+        "bootstrap; `claude --version` succeeds in the prepared local shell.\n"
+        "- launch_env_override: ok - Node `claude_review`: Launch env clears current `ANTHROPIC_API_KEY` for this "
+        "node via `node.env`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
     )
 
 

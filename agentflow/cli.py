@@ -524,6 +524,8 @@ def _pipeline_launch_env_override_checks(nodes: list[dict[str, object]]) -> list
                 detail = f"Node `{node_id}`: Launch env uses configured `{key}` for this node{source_label}."
             else:
                 detail = f"Node `{node_id}`: Launch env overrides current `{key}` for this node{source_label}."
+            if override.get("redacted") and override.get("cleared"):
+                detail = f"Node `{node_id}`: Launch env clears current `{key}` for this node{source_label}."
             if not override.get("redacted"):
                 current_value = override.get("current_value")
                 launch_value = override.get("launch_value")
@@ -934,6 +936,12 @@ def _provider_credentials_probe_timeout_check(
     )
 
 
+def _effective_launch_env_value(key: str, launch_env: dict[str, str]) -> str:
+    if key in launch_env:
+        return str(launch_env.get(key, "") or "")
+    return str(os.getenv(key, "") or "")
+
+
 def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     for node in getattr(pipeline, "nodes", None) or []:
@@ -946,10 +954,8 @@ def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
         node_env = getattr(node, "env", None) or {}
         provider = resolve_provider(getattr(node, "provider", None), AgentKind(_status_value(getattr(node, "agent", None)).lower()))
         provider_env = getattr(provider, "env", None) or {}
-        has_key = any(
-            isinstance(source, dict) and str(source.get(api_key_env, "")).strip()
-            for source in (node_env, provider_env)
-        ) or bool(str(os.getenv(api_key_env, "")).strip())
+        launch_env = merge_env_layers(provider_env, node_env)
+        has_key = bool(_effective_launch_env_value(api_key_env, launch_env).strip())
         bootstrap_probe = _provider_credentials_local_bootstrap_probe(
             node,
             api_key_env=api_key_env,
