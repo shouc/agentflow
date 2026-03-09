@@ -147,7 +147,9 @@ def _resolve_home_shell_source_target(token: str, home: Path) -> Path | None:
         return None
 
     resolved_home = home.resolve()
-    if normalized.startswith("~/"):
+    if normalized == "~":
+        candidate = resolved_home
+    elif normalized.startswith("~/"):
         candidate = resolved_home / normalized[2:]
     elif normalized.startswith("$HOME/"):
         candidate = resolved_home / normalized[6:]
@@ -157,9 +159,7 @@ def _resolve_home_shell_source_target(token: str, home: Path) -> Path | None:
         return None
     else:
         raw_path = Path(normalized)
-        if not raw_path.is_absolute():
-            return None
-        candidate = raw_path
+        candidate = raw_path if raw_path.is_absolute() else resolved_home / raw_path
 
     candidate = Path(os.path.normpath(str(candidate)))
 
@@ -1566,6 +1566,41 @@ def _reconcile_bash_login_startup_check(
     )
 
 
+def _reconcile_kimi_bootstrap_bash_login_startup_check(
+    home: Path,
+    startup_check: DoctorCheck,
+    kimi_check: DoctorCheck,
+) -> DoctorCheck:
+    if startup_check.status != "warning" or kimi_check.status != "ok":
+        return startup_check
+
+    login_file = _bash_login_file(home)
+    context = _bash_startup_chain_context(login_file)
+    if isinstance(startup_check.context, dict):
+        context.update(startup_check.context)
+    context["runtime_ready"] = True
+    if login_file is None:
+        return DoctorCheck(
+            name="bash_login_startup",
+            status="ok",
+            detail=(
+                "No `~/.bash_profile`, `~/.bash_login`, or `~/.profile` was found, but `bash -lic` already exposes "
+                "`kimi`; a `~/.bashrc` bridge is not required for this local Kimi bootstrap."
+            ),
+            context=context,
+        )
+
+    return DoctorCheck(
+        name="bash_login_startup",
+        status="ok",
+        detail=(
+            f"{_bash_login_file_clause(home, login_file)}, and `bash -lic` already exposes `kimi`; a `~/.bashrc` "
+            "bridge is not required for this local Kimi bootstrap."
+        ),
+        context=context,
+    )
+
+
 def build_local_smoke_doctor_report(home: Path | None = None) -> DoctorReport:
     resolved_home = home or Path.home()
     codex_check = _check_codex_executable(resolved_home)
@@ -1591,5 +1626,18 @@ def build_local_smoke_doctor_report(home: Path | None = None) -> DoctorReport:
 
 
 def build_local_kimi_bootstrap_doctor_report(home: Path | None = None) -> DoctorReport:
-    kimi_check = _check_kimi_bootstrap_helper(home)
-    return DoctorReport(status=_status_value(kimi_check.status), checks=[kimi_check])
+    resolved_home = home or Path.home()
+    bash_login_check = _check_bash_login_startup(resolved_home)
+    kimi_check = _check_kimi_bootstrap_helper(resolved_home)
+    bash_login_check = _reconcile_kimi_bootstrap_bash_login_startup_check(resolved_home, bash_login_check, kimi_check)
+    checks = [
+        bash_login_check,
+        kimi_check,
+    ]
+    if any(check.status == "failed" for check in checks):
+        status = "failed"
+    elif any(check.status == "warning" for check in checks):
+        status = "warning"
+    else:
+        status = "ok"
+    return DoctorReport(status=status, checks=checks)

@@ -40,6 +40,58 @@ def _doctor_report(status: str = "ok", detail: str = "ready") -> DoctorReport:
     )
 
 
+def _custom_kimi_preflight_report(
+    *,
+    kimi_status: str = "ok",
+    kimi_detail: str = "ready",
+    bash_status: str = "ok",
+    bash_detail: str = "startup ready",
+) -> DoctorReport:
+    statuses = {bash_status, kimi_status}
+    if "failed" in statuses:
+        report_status = "failed"
+    elif "warning" in statuses:
+        report_status = "warning"
+    else:
+        report_status = "ok"
+    return DoctorReport(
+        status=report_status,
+        checks=[
+            DoctorCheck(name="bash_login_startup", status=bash_status, detail=bash_detail),
+            DoctorCheck(name="kimi_shell_helper", status=kimi_status, detail=kimi_detail),
+        ],
+    )
+
+
+def _reject_bundled_smoke_doctor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: (_ for _ in ()).throw(AssertionError("bundled smoke doctor should not run for custom kimi preflight")),
+    )
+
+
+def _mock_custom_kimi_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    kimi_status: str = "ok",
+    kimi_detail: str = "ready",
+    bash_status: str = "ok",
+    bash_detail: str = "startup ready",
+) -> None:
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_kimi_bootstrap_doctor_report",
+        lambda: _custom_kimi_preflight_report(
+            kimi_status=kimi_status,
+            kimi_detail=kimi_detail,
+            bash_status=bash_status,
+            bash_detail=bash_detail,
+        ),
+    )
+
+
 def _completed_subprocess(returncode: int = 0, *, stdout: str = "", stderr: str = ""):
     def _run(*args, **kwargs):
         return subprocess.CompletedProcess(args=args[0], returncode=returncode, stdout=stdout, stderr=stderr)
@@ -2272,14 +2324,8 @@ nodes:
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setattr(
         agentflow.cli,
         "_run_pipeline",
@@ -2293,6 +2339,7 @@ nodes:
     payload = json.loads(result.stderr or result.stdout)
     assert payload["status"] == "warning"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -2327,14 +2374,8 @@ nodes:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
     monkeypatch.setattr(
@@ -2349,6 +2390,7 @@ nodes:
     payload = json.loads(result.stderr or result.stdout)
     assert payload["status"] == "failed"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -2389,14 +2431,8 @@ nodes:
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
         subprocess,
@@ -2416,6 +2452,7 @@ nodes:
     payload = json.loads(result.stderr or result.stdout)
     assert payload["status"] == "warning"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -2453,14 +2490,8 @@ nodes:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
         subprocess,
@@ -2479,6 +2510,7 @@ nodes:
     payload = json.loads(result.stderr or result.stdout)
     assert payload["status"] == "failed"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -2513,14 +2545,8 @@ nodes:
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setattr(
         agentflow.cli,
         "_run_pipeline",
@@ -2534,6 +2560,7 @@ nodes:
     payload = json.loads(result.stderr)
     assert payload["status"] == "warning"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -2568,14 +2595,8 @@ nodes:
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setattr(
         agentflow.cli,
         "_run_pipeline",
@@ -2589,6 +2610,7 @@ nodes:
     payload = json.loads(result.stderr)
     assert payload["status"] == "warning"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -2623,14 +2645,8 @@ nodes:
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        agentflow.cli,
-        "build_local_smoke_doctor_report",
-        lambda: DoctorReport(
-            status="ok",
-            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
-        ),
-    )
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setattr(
         agentflow.cli,
         "_run_pipeline",
@@ -2644,6 +2660,7 @@ nodes:
     payload = json.loads(result.stderr)
     assert payload["status"] == "warning"
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "kimi_shell_bootstrap",
@@ -3286,9 +3303,10 @@ def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monkey
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -3298,7 +3316,7 @@ def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monkey
         nodes=[
             SimpleNamespace(
                 agent=SimpleNamespace(value="codex"),
-                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=True),
             )
         ]
     )
@@ -3327,7 +3345,8 @@ def test_run_show_preflight_prints_successful_summary_to_stderr(monkeypatch):
             captured["wait_timeout"] = timeout
             return _completed_run(run_id, pipeline_name="custom-kimi-run")
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -3349,6 +3368,7 @@ def test_run_show_preflight_prints_successful_summary_to_stderr(monkeypatch):
     assert result.exit_code == 0
     assert result.stderr == (
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
@@ -3363,7 +3383,8 @@ def test_run_show_preflight_prints_successful_summary_to_stderr(monkeypatch):
 def test_run_auto_preflight_stops_when_local_codex_auth_is_unavailable(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     def fake_run(*args, **kwargs):
@@ -3410,6 +3431,7 @@ def test_run_auto_preflight_stops_when_local_codex_auth_is_unavailable(monkeypat
     assert captured["loaded_path"] == "custom-run.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- codex_auth: failed - Node `codex_plan` (codex) cannot authenticate local Codex after the node shell bootstrap; `codex login status` fails and `OPENAI_API_KEY` is not set in the current environment, `node.env`, or `provider.env`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -3420,7 +3442,8 @@ def test_run_auto_preflight_stops_when_local_codex_auth_is_unavailable(monkeypat
 def test_run_auto_preflight_stops_when_local_codex_is_unavailable_after_shell_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setattr(
         subprocess,
@@ -3460,6 +3483,7 @@ def test_run_auto_preflight_stops_when_local_codex_is_unavailable_after_shell_bo
     assert captured["loaded_path"] == "custom-run.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- codex_ready: failed - Node `codex_plan` (codex) cannot launch local Codex after the node shell bootstrap; `codex --version` fails in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -3470,7 +3494,8 @@ def test_run_auto_preflight_stops_when_local_codex_is_unavailable_after_shell_bo
 def test_run_auto_preflight_stops_when_local_claude_is_unavailable_after_shell_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.setattr(subprocess, "run", _completed_subprocess(returncode=1))
     monkeypatch.setattr(
         agentflow.cli,
@@ -3505,6 +3530,7 @@ def test_run_auto_preflight_stops_when_local_claude_is_unavailable_after_shell_b
     assert captured["loaded_path"] == "custom-run.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- claude_ready: failed - Node `claude_review` (claude) cannot launch local Claude after the node shell bootstrap; `claude --version` fails in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -3529,9 +3555,10 @@ def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_agent(monkeypatch
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -3575,9 +3602,10 @@ def test_run_auto_runs_preflight_for_custom_pipeline_with_shell_init_command_lis
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -4470,9 +4498,10 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monk
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -4498,6 +4527,52 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monk
     assert captured["wait_timeout"] is None
 
 
+def test_smoke_failed_preflight_for_custom_kimi_pipeline_includes_shell_bridge_when_available(monkeypatch):
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: (_ for _ in ()).throw(AssertionError("bundled smoke doctor should not run for custom kimi preflight")),
+    )
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_kimi_bootstrap_doctor_report",
+        lambda: DoctorReport(
+            status="failed",
+            checks=[
+                DoctorCheck(name="bash_login_startup", status="warning", detail="missing bridge"),
+                DoctorCheck(name="kimi_shell_helper", status="failed", detail="missing"),
+            ],
+        ),
+    )
+    monkeypatch.setattr(agentflow.cli, "build_bash_login_shell_bridge_recommendation", _shell_bridge_recommendation)
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="review",
+                agent=SimpleNamespace(value="claude"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=True),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: fake_pipeline)
+
+    result = runner.invoke(app, ["smoke", "custom-smoke.yaml"])
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        "Doctor: failed\n"
+        "- bash_login_startup: warning - missing bridge\n"
+        "- kimi_shell_helper: failed - missing\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: review (claude) via `target.shell_init`\n"
+        "Shell bridge suggestion for `~/.bash_profile` from `~/.profile`:\n"
+        "Reason: Bash login shells use `~/.bash_profile`, so `~/.profile` never runs.\n"
+        "if [ -f \"$HOME/.profile\" ]; then\n"
+        "  . \"$HOME/.profile\"\n"
+        "fi\n"
+    )
+
+
 def test_smoke_auto_runs_preflight_for_custom_claude_kimi_provider_without_host_anthropic_key(monkeypatch):
     captured: dict[str, object] = {}
     doctor_calls = 0
@@ -4515,9 +4590,10 @@ def test_smoke_auto_runs_preflight_for_custom_claude_kimi_provider_without_host_
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
@@ -4566,9 +4642,10 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_agent(monkeypat
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -4612,9 +4689,10 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_explicit_kimi_shell_
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -4657,9 +4735,10 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_backtick_eval_kimi_s
     def fake_doctor_report():
         nonlocal doctor_calls
         doctor_calls += 1
-        return _doctor_report()
+        return _custom_kimi_preflight_report()
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", fake_doctor_report)
     monkeypatch.setattr(
         agentflow.cli,
         "_build_runtime",
@@ -4955,7 +5034,7 @@ def test_doctor_supports_summary_output(monkeypatch):
 def test_doctor_with_pipeline_path_augments_report_for_kimi_shell_bootstrap_warning(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     fake_pipeline = SimpleNamespace(
         nodes=[
             SimpleNamespace(
@@ -4973,6 +5052,7 @@ def test_doctor_with_pipeline_path_augments_report_for_kimi_shell_bootstrap_warn
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: warning\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_shell_bootstrap: warning - Node `claude_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -4983,7 +5063,7 @@ def test_doctor_with_pipeline_path_augments_report_for_kimi_shell_bootstrap_warn
 def test_doctor_with_pipeline_path_fails_for_non_bash_kimi_shell_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     fake_pipeline = SimpleNamespace(
         nodes=[
             SimpleNamespace(
@@ -5003,6 +5083,7 @@ def test_doctor_with_pipeline_path_fails_for_non_bash_kimi_shell_bootstrap(monke
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_shell_bootstrap: failed - Node `claude_review`: `shell_init: kimi` requires bash-style shell bootstrap, but `target.shell` resolves to `sh`. Use `shell: bash` with `target.shell_login: true` and `target.shell_interactive: true`, use `bash -lic`, or export provider variables directly.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -5013,7 +5094,7 @@ def test_doctor_with_pipeline_path_fails_for_non_bash_kimi_shell_bootstrap(monke
 def test_doctor_with_pipeline_path_augments_report_for_kimi_agent_bootstrap_warning(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     fake_pipeline = SimpleNamespace(
         nodes=[
             SimpleNamespace(
@@ -5032,6 +5113,7 @@ def test_doctor_with_pipeline_path_augments_report_for_kimi_agent_bootstrap_warn
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: warning\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_shell_bootstrap: warning - Node `kimi_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -5071,7 +5153,7 @@ def test_doctor_with_pipeline_path_fails_when_kimi_node_is_missing_kimi_api_key(
 def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from_kimi_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
@@ -5094,6 +5176,7 @@ def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
@@ -5103,7 +5186,7 @@ def test_doctor_with_pipeline_path_accepts_claude_kimi_provider_credentials_from
 def test_doctor_with_pipeline_path_accepts_claude_anthropic_provider_credentials_from_kimi_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
@@ -5126,6 +5209,7 @@ def test_doctor_with_pipeline_path_accepts_claude_anthropic_provider_credentials
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
@@ -5135,7 +5219,7 @@ def test_doctor_with_pipeline_path_accepts_claude_anthropic_provider_credentials
 def test_doctor_with_pipeline_path_fails_when_local_claude_is_unavailable_after_shell_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setattr(subprocess, "run", _completed_subprocess(returncode=1))
     fake_pipeline = SimpleNamespace(
         nodes=[
@@ -5165,6 +5249,7 @@ def test_doctor_with_pipeline_path_fails_when_local_claude_is_unavailable_after_
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- claude_ready: failed - Node `claude_review` (claude) cannot launch local Claude after the node shell bootstrap; `claude --version` fails in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -5175,7 +5260,7 @@ def test_doctor_with_pipeline_path_fails_when_local_claude_is_unavailable_after_
 def test_doctor_with_pipeline_path_fails_when_local_codex_auth_is_unavailable(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     def fake_run(*args, **kwargs):
@@ -5217,6 +5302,7 @@ def test_doctor_with_pipeline_path_fails_when_local_codex_auth_is_unavailable(mo
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- codex_auth: failed - Node `codex_plan` (codex) cannot authenticate local Codex after the node shell bootstrap; `codex login status` fails and `OPENAI_API_KEY` is not set in the current environment, `node.env`, or `provider.env`.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -5227,7 +5313,7 @@ def test_doctor_with_pipeline_path_fails_when_local_codex_auth_is_unavailable(mo
 def test_doctor_with_pipeline_path_accepts_local_codex_login_status_from_shell_bootstrap(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
         subprocess,
@@ -5262,6 +5348,7 @@ def test_doctor_with_pipeline_path_accepts_local_codex_login_status_from_shell_b
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
@@ -5337,7 +5424,7 @@ def test_doctor_with_pipeline_path_accepts_provider_credentials_from_split_shell
 def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_credentials_from_shell_init_helper(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fake_pipeline = SimpleNamespace(
         nodes=[
@@ -5369,6 +5456,7 @@ def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_credentials_from
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
@@ -5378,7 +5466,7 @@ def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_credentials_from
 def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_env_base_url_credentials_from_shell_init_helper(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fake_pipeline = SimpleNamespace(
         nodes=[
@@ -5409,6 +5497,7 @@ def test_doctor_with_pipeline_path_accepts_custom_kimi_provider_env_base_url_cre
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
         "Pipeline auto preflight matches: claude_review (claude) via `target.shell_init`\n"
@@ -5849,7 +5938,7 @@ def test_doctor_with_pipeline_path_accepts_kimi_api_key_from_node_env(monkeypatc
 def test_doctor_with_pipeline_path_fails_when_local_kimi_bridge_is_unavailable(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setattr(subprocess, "run", _completed_subprocess(returncode=1))
     monkeypatch.delenv("KIMI_API_KEY", raising=False)
     fake_pipeline = SimpleNamespace(
@@ -5880,6 +5969,7 @@ def test_doctor_with_pipeline_path_fails_when_local_kimi_bridge_is_unavailable(m
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert result.stdout == (
         "Doctor: failed\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_ready: failed - Node `kimi_review` (kimi) cannot launch the local Kimi bridge after the node shell bootstrap; `python-kimi -c 'import agentflow.remote.kimi_bridge'` fails in the prepared local shell.\n"
         "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
@@ -5940,7 +6030,7 @@ def test_doctor_with_pipeline_path_supports_json_summary_output(monkeypatch):
 def test_doctor_with_pipeline_path_reports_auto_preflight_metadata_in_json(monkeypatch):
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setattr(subprocess, "run", _completed_subprocess())
     fake_pipeline = SimpleNamespace(
         nodes=[
@@ -5959,7 +6049,10 @@ def test_doctor_with_pipeline_path_reports_auto_preflight_metadata_in_json(monke
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert json.loads(result.stdout) == {
         "status": "ok",
-        "checks": [{"name": "kimi_shell_helper", "status": "ok", "detail": "ready"}],
+        "checks": [
+            {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
+            {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        ],
         "pipeline": {
             "auto_preflight": {
                 "enabled": True,
@@ -5996,7 +6089,7 @@ nodes:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
 
@@ -6005,6 +6098,7 @@ nodes:
     assert result.exit_code == 0
     assert result.stdout.startswith(
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- launch_env_override: ok - Node `review`: Launch env uses configured `ANTHROPIC_BASE_URL` value `https://api.kimi.com/coding/` instead of current `https://open.bigmodel.cn/api/anthropic` via `provider.base_url`.\n"
     )
@@ -6026,7 +6120,7 @@ nodes:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
 
@@ -6035,6 +6129,7 @@ nodes:
     assert result.exit_code == 0
     assert result.stdout.startswith(
         "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
         "- kimi_shell_helper: ok - ready\n"
         "- launch_env_override: ok - Node `review`: Launch env uses configured `ANTHROPIC_BASE_URL` value `https://api.kimi.com/coding/` instead of current `https://open.bigmodel.cn/api/anthropic` via `provider.base_url`.\n"
         "- bootstrap_env_override: ok - Node `review`: Local shell bootstrap overrides current `ANTHROPIC_API_KEY` for this node via `target.bootstrap` (`kimi` helper).\n"
@@ -6060,7 +6155,7 @@ nodes:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
 
@@ -6069,6 +6164,7 @@ nodes:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "launch_env_override",
@@ -6113,7 +6209,7 @@ nodes:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    _mock_custom_kimi_preflight(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
 
@@ -6122,6 +6218,7 @@ nodes:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["checks"] == [
+        {"name": "bash_login_startup", "status": "ok", "detail": "startup ready"},
         {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
         {
             "name": "launch_env_override",

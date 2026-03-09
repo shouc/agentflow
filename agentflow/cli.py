@@ -446,10 +446,6 @@ def _preflight_base_report(path: str, pipeline: object) -> object:
     if _path_matches_bundled_smoke(path):
         return _doctor_report()
     if _pipeline_uses_kimi_smoke_preflight(pipeline):
-        report = _doctor_report()
-        checks = list(getattr(report, "checks", []) or [])
-        if len(checks) == 1 and getattr(checks[0], "name", None) == "kimi_shell_helper":
-            return report
         return build_local_kimi_bootstrap_doctor_report()
     return _empty_doctor_report()
 

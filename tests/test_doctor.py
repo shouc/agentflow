@@ -13,6 +13,7 @@ from agentflow.doctor import (
     _prepared_kimi_readiness_execution,
     _should_probe_local_claude,
     build_bash_login_shell_bridge_recommendation,
+    build_local_kimi_bootstrap_doctor_report,
     build_local_smoke_doctor_report,
     build_pipeline_local_claude_readiness_checks,
     build_pipeline_local_codex_auth_checks,
@@ -239,6 +240,69 @@ def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkey
                 "detail": _KIMI_HELPER_OK_DETAIL,
             },
         ],
+    }
+
+
+def test_local_kimi_bootstrap_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "agentflow.doctor.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr=""),
+    )
+
+    report = build_local_kimi_bootstrap_doctor_report(home=home)
+
+    assert report.status == "ok"
+    assert report.as_dict() == {
+        "status": "ok",
+        "checks": [
+            {
+                "name": "bash_login_startup",
+                "status": "ok",
+                "detail": "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` exists, and it references `~/.bashrc`.",
+                "context": _startup_context(
+                    "~/.profile",
+                    "~/.bashrc",
+                    login_file="~/.profile",
+                    bashrc_exists=True,
+                ),
+            },
+            {
+                "name": "kimi_shell_helper",
+                "status": "ok",
+                "detail": (
+                    "`kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, and sets "
+                    "`ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`."
+                ),
+            },
+        ],
+    }
+
+
+def test_local_kimi_bootstrap_doctor_report_accepts_runtime_ready_shell_without_login_file(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    monkeypatch.setattr(
+        "agentflow.doctor.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr=""),
+    )
+
+    report = build_local_kimi_bootstrap_doctor_report(home=home)
+
+    assert report.status == "ok"
+    assert report.as_dict()["checks"][0] == {
+        "name": "bash_login_startup",
+        "status": "ok",
+        "detail": (
+            "No `~/.bash_profile`, `~/.bash_login`, or `~/.profile` was found, but `bash -lic` already exposes "
+            "`kimi`; a `~/.bashrc` bridge is not required for this local Kimi bootstrap."
+        ),
+        "context": _startup_context(runtime_ready=True),
     }
 
 
@@ -534,7 +598,7 @@ def test_local_smoke_doctor_report_ok_with_absolute_home_bridge(tmp_path: Path, 
     }
 
 
-def test_local_smoke_doctor_report_rejects_relative_bashrc_bridge(tmp_path: Path):
+def test_local_smoke_doctor_report_accepts_relative_bashrc_bridge(tmp_path: Path):
     home = tmp_path / "home"
     home.mkdir()
     (home / ".profile").write_text('. .bashrc\n', encoding="utf-8")
@@ -544,16 +608,11 @@ def test_local_smoke_doctor_report_rejects_relative_bashrc_bridge(tmp_path: Path
 
     assert startup_check.as_dict() == {
         "name": "bash_login_startup",
-        "status": "warning",
-        "detail": "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` exists, but it does not reference `~/.bashrc`.",
-        "context": _startup_context("~/.profile", login_file="~/.profile"),
+        "status": "ok",
+        "detail": "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` exists, and it references `~/.bashrc`.",
+        "context": _startup_context("~/.profile", "~/.bashrc", login_file="~/.profile", bashrc_exists=True),
     }
-    assert build_bash_login_shell_bridge_recommendation(home).as_dict() == {
-        "target": "~/.profile",
-        "source": "~/.bashrc",
-        "snippet": 'if [ -f "$HOME/.bashrc" ]; then\n  . "$HOME/.bashrc"\nfi\n',
-        "reason": "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` exists, but it does not reference `~/.bashrc`.",
-    }
+    assert build_bash_login_shell_bridge_recommendation(home) is None
 
 
 def test_local_smoke_doctor_report_accepts_symlinked_home_bashrc(tmp_path: Path, monkeypatch):
@@ -1418,6 +1477,30 @@ def test_bash_login_startup_ignores_echoed_source_text(tmp_path: Path):
     }
 
 
+def test_bash_login_startup_accepts_relative_bashrc_bridge(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    startup_check = _check_bash_login_startup(home)
+
+    assert startup_check.as_dict() == {
+        "name": "bash_login_startup",
+        "status": "ok",
+        "detail": (
+            "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` "
+            "exists, and it references `~/.bashrc`."
+        ),
+        "context": _startup_context(
+            "~/.profile",
+            "~/.bashrc",
+            login_file="~/.profile",
+            bashrc_exists=True,
+        ),
+    }
+
+
 def test_shell_bridge_recommendation_ignores_echoed_source_text(tmp_path: Path):
     home = tmp_path / "home"
     home.mkdir()
@@ -1435,6 +1518,17 @@ def test_shell_bridge_recommendation_ignores_echoed_source_text(tmp_path: Path):
             "exists, but it does not reference `~/.bashrc`."
         ),
     }
+
+
+def test_shell_bridge_recommendation_is_none_when_relative_profile_bridge_reaches_bashrc(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home)
+
+    assert recommendation is None
 
 
 def test_shell_bridge_recommendation_reuses_shadowed_profile_bridge(tmp_path: Path):
