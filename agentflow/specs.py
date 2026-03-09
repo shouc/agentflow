@@ -578,7 +578,7 @@ class PipelineSpec(BaseModel):
 
     @property
     def working_path(self) -> Path:
-        return Path(self.working_dir).resolve()
+        return Path(self.working_dir).expanduser().resolve()
 
 
 class NormalizedTraceEvent(BaseModel):

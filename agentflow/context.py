@@ -29,7 +29,7 @@ def render_node_prompt(
 ) -> str:
     context = build_render_context(pipeline, results)
     prompt = render_template(node.prompt, context)
-    skill_prelude = compile_skill_prelude(node.skills, Path(pipeline.working_dir).resolve())
+    skill_prelude = compile_skill_prelude(node.skills, pipeline.working_path)
     if skill_prelude:
         return f"Selected skills:\n{skill_prelude}\n\nTask:\n{prompt}"
     return prompt
