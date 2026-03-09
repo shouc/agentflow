@@ -35,19 +35,24 @@ def _parse_pipeline_text(data: str) -> Any:
 def _resolve_file_relative_paths(parsed: dict[str, Any], base_dir: Path) -> dict[str, Any]:
     resolved = dict(parsed)
     working_dir_value = resolved.get("working_dir", ".")
-    working_dir = Path(working_dir_value)
+    working_dir = Path(working_dir_value).expanduser()
     if not working_dir.is_absolute():
         working_dir = (base_dir / working_dir).resolve()
         resolved["working_dir"] = str(working_dir)
     else:
         working_dir = working_dir.resolve()
+        resolved["working_dir"] = str(working_dir)
 
     local_target_defaults = resolved.get("local_target_defaults")
     if isinstance(local_target_defaults, dict) and local_target_defaults.get("kind", "local") == "local":
         cwd = local_target_defaults.get("cwd")
-        if isinstance(cwd, str) and cwd and not Path(cwd).is_absolute():
+        if isinstance(cwd, str) and cwd:
+            expanded_cwd = Path(cwd).expanduser()
             updated_local_target_defaults = dict(local_target_defaults)
-            updated_local_target_defaults["cwd"] = str((working_dir / cwd).resolve())
+            if expanded_cwd.is_absolute():
+                updated_local_target_defaults["cwd"] = str(expanded_cwd.resolve())
+            else:
+                updated_local_target_defaults["cwd"] = str((working_dir / expanded_cwd).resolve())
             resolved["local_target_defaults"] = updated_local_target_defaults
 
     nodes: list[Any] = []
@@ -59,9 +64,13 @@ def _resolve_file_relative_paths(parsed: dict[str, Any], base_dir: Path) -> dict
         target = updated.get("target")
         if isinstance(target, dict) and target.get("kind", "local") == "local":
             cwd = target.get("cwd")
-            if isinstance(cwd, str) and cwd and not Path(cwd).is_absolute():
+            if isinstance(cwd, str) and cwd:
+                expanded_cwd = Path(cwd).expanduser()
                 updated_target = dict(target)
-                updated_target["cwd"] = str((working_dir / cwd).resolve())
+                if expanded_cwd.is_absolute():
+                    updated_target["cwd"] = str(expanded_cwd.resolve())
+                else:
+                    updated_target["cwd"] = str((working_dir / expanded_cwd).resolve())
                 updated["target"] = updated_target
         nodes.append(updated)
     resolved["nodes"] = nodes
