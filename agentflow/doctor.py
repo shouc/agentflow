@@ -36,6 +36,8 @@ _KIMI_BASE_URL_MISMATCH_EXIT_CODE = 16
 _CODEX_LOGIN_STATUS_AFTER_KIMI_FAILED_EXIT_CODE = 17
 _CLAUDE_AFTER_KIMI_VERSION_FAILED_EXIT_CODE = 18
 _CODEX_AFTER_KIMI_VERSION_FAILED_EXIT_CODE = 19
+_CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE = 20
+_CODEX_AUTH_VIA_API_KEY_EXIT_CODE = 21
 _EXPECTED_KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 _REDACTED = "<redacted>"
 _BASH_INTERACTIVE_STDERR_NOISE = (
@@ -410,15 +412,39 @@ def _local_codex_auth_check_detail(node_id: str, *, api_key_env: str, allow_logi
     )
 
 
-def _local_codex_auth_ok_check_detail(node_id: str, *, api_key_env: str, allow_login_status: bool) -> str:
+def _local_codex_auth_ok_sources_detail(
+    *,
+    api_key_env: str,
+    allow_login_status: bool,
+    source: str | None = None,
+) -> str:
+    if source is not None:
+        return f"`{source}`"
+    if allow_login_status:
+        return f"`codex login status` or `{api_key_env}`"
+    return f"`{api_key_env}`"
+
+
+def _local_codex_auth_ok_check_detail(
+    node_id: str,
+    *,
+    api_key_env: str,
+    allow_login_status: bool,
+    source: str | None = None,
+) -> str:
+    auth_sources_detail = _local_codex_auth_ok_sources_detail(
+        api_key_env=api_key_env,
+        allow_login_status=allow_login_status,
+        source=source,
+    )
     if allow_login_status:
         return (
             f"Node `{node_id}` (codex) can authenticate local Codex after the node shell bootstrap via "
-            f"`codex login status` or `{api_key_env}`."
+            f"{auth_sources_detail}."
         )
     return (
         f"Node `{node_id}` (codex) can authenticate local Codex after the node shell bootstrap via "
-        f"`{api_key_env}`."
+        f"{auth_sources_detail}."
     )
 
 
@@ -492,13 +518,16 @@ def _codex_auth_probe_command(executable: str, *, api_key_env: str, allow_login_
         "import sys",
         "api_key_env = sys.argv[2]",
         "if api_key_env and os.getenv(api_key_env, '').strip():",
-        "    raise SystemExit(0)",
+        f"    raise SystemExit({_CODEX_AUTH_VIA_API_KEY_EXIT_CODE})",
     ]
     if allow_login_status:
         probe_lines.extend(
             [
                 "import subprocess",
-                "raise SystemExit(subprocess.run([sys.argv[1], 'login', 'status']).returncode)",
+                (
+                    f"raise SystemExit({_CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE} "
+                    "if subprocess.run([sys.argv[1], 'login', 'status']).returncode == 0 else 1)"
+                ),
             ]
         )
     else:
@@ -699,12 +728,16 @@ def _kimi_probe_execution_note(node: object, executable: str, paths: object) -> 
     return "using the repo-local `.venv` Python by default"
 
 
-def _can_authenticate_local_codex(node: object, pipeline: object | None = None) -> tuple[bool, str | None]:
+def _can_authenticate_local_codex(
+    node: object,
+    pipeline: object | None = None,
+) -> tuple[bool, str | None, str | None]:
     prepared_with_paths = _prepared_codex_auth_execution(node, pipeline)
     if prepared_with_paths is None:
-        return True, None
+        return True, None, None
 
     prepared, paths = prepared_with_paths
+    api_key_env, allow_login_status = _resolved_local_codex_auth_requirements(node)
 
     try:
         launch_plan = LocalRunner().plan_execution(
@@ -713,7 +746,7 @@ def _can_authenticate_local_codex(node: object, pipeline: object | None = None) 
             paths,
         )
     except Exception:
-        return False, None
+        return False, None, None
 
     env = os.environ.copy()
     env.update(launch_plan.env)
@@ -727,15 +760,21 @@ def _can_authenticate_local_codex(node: object, pipeline: object | None = None) 
             text=True,
         )
     except OSError:
-        return False, None
+        return False, None, None
     except _DoctorSubprocessTimeout as exc:
-        return False, _local_probe_timeout_detail(
+        return False, None, _local_probe_timeout_detail(
             str(_object_value(node, "id", "codex")),
             AgentKind.CODEX.value,
             exc.command_text,
             exc.timeout_seconds,
         )
-    return result.returncode == 0, None
+    if result.returncode == 0:
+        return True, None, None
+    if result.returncode == _CODEX_AUTH_VIA_API_KEY_EXIT_CODE:
+        return True, api_key_env, None
+    if allow_login_status and result.returncode == _CODEX_AUTH_VIA_LOGIN_STATUS_EXIT_CODE:
+        return True, "codex login status", None
+    return False, None, None
 
 
 def _can_launch_local_codex(node: object, pipeline: object | None = None) -> tuple[bool, str | None, str | None]:
@@ -1010,7 +1049,7 @@ def build_pipeline_local_codex_auth_checks(pipeline: object) -> list[DoctorCheck
         if not ready:
             continue
 
-        authenticated, failure_detail = _can_authenticate_local_codex(node, pipeline)
+        authenticated, _, failure_detail = _can_authenticate_local_codex(node, pipeline)
         if authenticated:
             continue
 
@@ -1047,7 +1086,7 @@ def build_pipeline_local_codex_auth_info_checks(pipeline: object) -> list[Doctor
         if not ready:
             continue
 
-        authenticated, failure_detail = _can_authenticate_local_codex(node, pipeline)
+        authenticated, auth_source, failure_detail = _can_authenticate_local_codex(node, pipeline)
         if not authenticated:
             continue
 
@@ -1063,6 +1102,7 @@ def build_pipeline_local_codex_auth_info_checks(pipeline: object) -> list[Doctor
                         node_id,
                         api_key_env=api_key_env,
                         allow_login_status=allow_login_status,
+                        source=auth_source,
                     )
                 ),
             )
