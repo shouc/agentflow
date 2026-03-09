@@ -2666,6 +2666,37 @@ nodes:
     ]
 
 
+def test_inspect_command_detects_export_kimi_wrapper_in_auto_preflight(tmp_path):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-kimi-export-wrapper
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: "bash -lc 'export $(kimi) && {command}'"
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["pipeline"]["auto_preflight"] == {
+        "enabled": True,
+        "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+        "matches": [{"node_id": "review", "agent": "claude", "trigger": "target.shell"}],
+        "match_summary": ["review (claude) via `target.shell`"],
+    }
+    assert payload["nodes"][0]["warnings"] == [
+        "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    ]
+
+
 def test_inspect_command_detects_env_var_eval_kimi_wrapper_in_auto_preflight(tmp_path):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(

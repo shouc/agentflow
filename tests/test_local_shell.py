@@ -54,10 +54,14 @@ def test_shell_command_uses_kimi_helper_ignores_probe_commands(command: str):
         "bash -lc 'which kimi >/dev/null; kimi && {command}'",
         'eval "$(kimi)"',
         'eval `kimi`',
+        'export $(kimi)',
+        'export `kimi`',
         'source <(kimi)',
         'KIMI_ENV="$(kimi)" && eval "$KIMI_ENV"',
         "bash -lc 'eval \"$(kimi)\" && {command}'",
         "bash -lc 'eval `kimi` && {command}'",
+        "bash -lc 'export $(kimi) && {command}'",
+        "bash -lc 'export `kimi` && {command}'",
         "bash -lc 'source <(kimi) && {command}'",
         "bash -lc 'KIMI_ENV=\"$(kimi)\" && eval \"$KIMI_ENV\" && {command}'",
     ],
@@ -105,6 +109,18 @@ def test_kimi_shell_init_requires_interactive_bash_warning_ignores_probe_only_sh
     }
 
     assert kimi_shell_init_requires_interactive_bash_warning(target) is None
+
+
+def test_kimi_shell_init_requires_interactive_bash_warning_detects_export_kimi_wrapper():
+    target = {
+        "kind": "local",
+        "shell": "bash -lc 'export $(kimi) && {command}'",
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target) == (
+        "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually "
+        "unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    )
 
 
 def test_kimi_shell_init_requires_bash_warning_for_non_bash_shell_init():

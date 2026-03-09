@@ -33,7 +33,7 @@ _BASH_UNSUPPORTED_LONG_FLAG_DETAILS = {
 _COMMAND_POSITION_PREFIX_TOKENS = {"builtin", "command", "env", "exec", "nohup", "sudo", "time"}
 _ENV_ASSIGNMENT_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _SHELL_CONTROL_TOKENS = {"&&", "||", "|", ";", "do", "then", "elif"}
-_KIMI_SUBSTITUTION_CONSUMERS = {".", "eval", "source"}
+_KIMI_SUBSTITUTION_CONSUMERS = {".", "eval", "export", "source"}
 _BASHRC_SOURCE_COMMANDS = {".", "source"}
 _COMMAND_SUBSTITUTION_PATTERN = re.compile(r"(?:\$|<)\(([^()]*)\)")
 _BACKTICK_COMMAND_SUBSTITUTION_PATTERN = re.compile(r"(?<!\\)`([^`]*)`")
