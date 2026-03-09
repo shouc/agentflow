@@ -13,9 +13,9 @@ from agentflow.local_shell import (
     shell_command_uses_kimi_helper,
     shell_init_exports_env_var,
     shell_init_uses_kimi_helper,
+    summarize_target_bash_login_startup,
     shell_template_exports_env_var_before_command,
     target_bash_home,
-    target_bash_login_startup_chain,
     target_bash_login_startup_file,
     target_bash_startup_exports_env_var,
     target_uses_interactive_bash,
@@ -377,11 +377,9 @@ def _bootstrap_summary(
     if uses_login_bash:
         parts.append("login=true")
 
-    login_startup_chain = target_bash_login_startup_chain(target, env=launch_env, cwd=cwd)
-    if login_startup_chain:
-        parts.append(f"startup={' -> '.join(login_startup_chain)}")
-    elif uses_login_bash:
-        parts.append("startup=none")
+    login_startup = summarize_target_bash_login_startup(target, env=launch_env, cwd=cwd)
+    if login_startup is not None:
+        parts.append(f"startup={login_startup}")
 
     if target_uses_interactive_bash(target):
         parts.append("interactive=true")

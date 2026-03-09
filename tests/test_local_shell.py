@@ -13,6 +13,7 @@ from agentflow.local_shell import (
     shell_command_uses_kimi_helper,
     shell_template_exports_env_var_before_command,
     shell_wrapper_requires_command_placeholder,
+    summarize_target_bash_login_startup,
     target_bash_login_startup_chain,
     target_bash_login_startup_file,
     target_bash_startup_exports_env_var,
@@ -255,6 +256,35 @@ def test_kimi_shell_init_requires_interactive_bash_warning_ignores_plain_text_ki
     }
 
     assert kimi_shell_init_requires_interactive_bash_warning(target) is None
+
+
+def test_summarize_target_bash_login_startup_includes_transitive_bashrc_bridge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+    target = {"kind": "local", "shell": "bash", "shell_login": True}
+
+    assert summarize_target_bash_login_startup(target) == "~/.profile -> ~/.bashrc"
+
+
+def test_summarize_target_bash_login_startup_reports_missing_login_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+    target = {"kind": "local", "shell": "bash", "shell_login": True}
+
+    assert summarize_target_bash_login_startup(target) == "none"
+
+
+def test_summarize_target_bash_login_startup_returns_none_for_non_login_shell():
+    target = {"kind": "local", "shell": "bash"}
+
+    assert summarize_target_bash_login_startup(target) is None
 
 
 def test_kimi_shell_init_requires_interactive_bash_warning_detects_eval_style_shell_wrapper():

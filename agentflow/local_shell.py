@@ -1398,6 +1398,21 @@ def target_bash_login_startup_chain(
     return tuple(f"~/{path}" for path in _bash_login_startup_chain(resolved_home, startup_file, cwd=cwd))
 
 
+def summarize_target_bash_login_startup(
+    target: Any,
+    *,
+    home: Path | None = None,
+    env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
+) -> str | None:
+    startup_chain = target_bash_login_startup_chain(target, home=home, env=env, cwd=cwd)
+    if startup_chain:
+        return " -> ".join(startup_chain)
+    if target_uses_login_bash(target):
+        return "none"
+    return None
+
+
 def shell_command_uses_kimi_helper(command: str | None) -> bool:
     if not isinstance(command, str) or not command.strip():
         return False
