@@ -44,10 +44,11 @@ agentflow templates
 agentflow init > pipeline.yaml
 agentflow init kimi-smoke.yaml --template local-kimi-smoke
 agentflow init kimi-shell-init-smoke.yaml --template local-kimi-shell-init-smoke
+agentflow init kimi-shell-wrapper-smoke.yaml --template local-kimi-shell-wrapper-smoke
 ```
 
 Use `agentflow templates` to list the bundled starters with short descriptions, example source files, and the matching `agentflow init --template ...` command.
-The default `pipeline` template is a generic Codex/Claude/Kimi DAG. The `local-kimi-smoke` template is the same real-agent local Codex plus Claude-on-Kimi smoke DAG used by the repo's verification scripts, so it is a fast way to bootstrap a known-good local setup into your own workspace. When you want that same local smoke flow with explicit `shell: bash`, `shell_login: true`, `shell_interactive: true`, and `shell_init: kimi` wiring instead of the shorthand `bootstrap: kimi`, use the `local-kimi-shell-init-smoke` template.
+The default `pipeline` template is a generic Codex/Claude/Kimi DAG. The `local-kimi-smoke` template is the same real-agent local Codex plus Claude-on-Kimi smoke DAG used by the repo's verification scripts, so it is a fast way to bootstrap a known-good local setup into your own workspace. When you want that same local smoke flow with explicit `shell: bash`, `shell_login: true`, `shell_interactive: true`, and `shell_init: kimi` wiring instead of the shorthand `bootstrap: kimi`, use the `local-kimi-shell-init-smoke` template. When you want the same flow with an explicit `target.shell: "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"` wrapper, use the `local-kimi-shell-wrapper-smoke` template.
 
 Validate a pipeline:
 
