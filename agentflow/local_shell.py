@@ -270,7 +270,7 @@ def _shell_command_exported_env_for_target(
             declare_exports = False
             continue
 
-        if expects_command and normalized == target:
+        if expects_command and _shell_token_matches_target(token, target):
             return dict(exported_values)
 
         if expects_command:
@@ -288,7 +288,7 @@ def _shell_command_exported_env_for_target(
             active_command = os.path.basename(token)
             active_command_prefix_env = dict(pending_assignments)
             declare_exports = False
-            if normalized == target:
+            if _shell_token_matches_target(token, target):
                 return dict(exported_values)
             if active_command not in {"export", *_EXPORT_STYLE_COMMANDS}:
                 pending_assignments = {}
@@ -1141,7 +1141,7 @@ def bash_login_shell_loads_command(
         cwd=cwd,
         env=env,
     )
-    shell_env = _shell_command_prefix_env_for_target(bash_shell, "bash")
+    shell_env = _shell_command_env_for_target(bash_shell, "bash", env=env)
     launch_env = os.environ.copy()
     if isinstance(env, dict):
         for key, value in env.items():
@@ -2147,7 +2147,7 @@ def probe_target_bash_startup_env_var(
     effective_home = target_bash_home(target, home=home, env=env, cwd=cwd)
     shell = _target_value(target, "shell")
     bash_shell = shell if isinstance(shell, str) else None
-    shell_env = _shell_command_prefix_env_for_target(bash_shell, "bash")
+    shell_env = _shell_command_env_for_target(bash_shell, "bash", env=env)
     launch_env = os.environ.copy()
     if isinstance(env, dict):
         for key, value in env.items():

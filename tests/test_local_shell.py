@@ -805,6 +805,27 @@ def test_kimi_shell_init_requires_interactive_bash_warning_accepts_login_shell_w
     )
 
 
+def test_kimi_shell_init_requires_interactive_bash_warning_accepts_login_shell_with_exported_env_bridge(
+    tmp_path: Path,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    helper_file = tmp_path / "kimi.env"
+    helper_file.write_text("kimi(){ :; }\n", encoding="utf-8")
+    (home / ".profile").write_text(
+        'if [ -n "${AGENTFLOW_KIMI_ENV_FILE:-}" ]; then . "$AGENTFLOW_KIMI_ENV_FILE"; fi\n',
+        encoding="utf-8",
+    )
+    target = {
+        "kind": "local",
+        "shell": f"export AGENTFLOW_KIMI_ENV_FILE={helper_file} && bash",
+        "shell_login": True,
+        "shell_init": ["command -v kimi >/dev/null 2>&1", "kimi"],
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target, home=home) is None
+
+
 def test_kimi_shell_init_requires_interactive_bash_warning_ignores_echoed_login_source_text(
     tmp_path: Path,
 ):
@@ -1162,6 +1183,35 @@ def test_target_bash_startup_exports_env_var_uses_shell_wrapper_env_and_bash_exe
     assert observed["env"]["HOME"] == str(home)
 
 
+def test_target_bash_startup_exports_env_var_uses_exported_shell_wrapper_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    auth_file = tmp_path / "anthropic.env"
+    auth_file.write_text("export ANTHROPIC_API_KEY=from-shell-wrapper\n", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = list(command)
+        observed["env"] = dict(kwargs["env"])
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.local_shell.subprocess.run", fake_run)
+
+    target = {
+        "kind": "local",
+        "shell": f"export AGENTFLOW_KIMI_ENV_FILE={auth_file} && /opt/custom/bash",
+        "shell_login": True,
+    }
+
+    assert target_bash_startup_exports_env_var(target, "ANTHROPIC_API_KEY", home=home) is True
+    assert observed["command"] == ["/opt/custom/bash", "-lc", 'test -n "${ANTHROPIC_API_KEY:-}"']
+    assert observed["env"]["AGENTFLOW_KIMI_ENV_FILE"] == str(auth_file)
+    assert observed["env"]["HOME"] == str(home)
+
+
 def test_shell_template_exported_env_var_value_before_command_detects_exported_bash_env_before_bash(
     tmp_path: Path,
 ):
@@ -1310,6 +1360,38 @@ def test_target_bash_startup_exports_env_var_prefers_shell_wrapper_env_over_laun
     target = {
         "kind": "local",
         "shell": "env AGENTFLOW_KIMI_ENV_FILE=from-shell-wrapper bash",
+        "shell_login": True,
+    }
+
+    assert (
+        target_bash_startup_exports_env_var(
+            target,
+            "ANTHROPIC_API_KEY",
+            home=home,
+            env={"AGENTFLOW_KIMI_ENV_FILE": "from-launch-env"},
+        )
+        is True
+    )
+    assert observed["env"]["AGENTFLOW_KIMI_ENV_FILE"] == "from-shell-wrapper"
+
+
+def test_target_bash_startup_exports_env_var_prefers_exported_shell_wrapper_env_over_launch_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["env"] = dict(kwargs["env"])
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.local_shell.subprocess.run", fake_run)
+
+    target = {
+        "kind": "local",
+        "shell": "export AGENTFLOW_KIMI_ENV_FILE=from-shell-wrapper && bash",
         "shell_login": True,
     }
 
