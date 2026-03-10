@@ -93,6 +93,7 @@ agentflow run examples/pipeline.yaml
 ```
 
 On an interactive terminal, `agentflow run` now defaults to the same compact per-node summary that `smoke` uses; when stdout is redirected or piped, it still defaults to the full JSON run record so scripts do not break. You can always force either shape with `--output summary`, `--output json-summary`, or `--output json`.
+When a node fails with an upstream provider response such as `API Error: 402 ...`, those summary views now add a `Diagnosis:` line for common provider-side rejection patterns, so membership, billing, quota, or other upstream account-state failures are easier to distinguish from a broken AgentFlow launch path.
 When you use `agentflow run` with the bundled real-agent smoke file, an explicit reference to that bundled file, or a custom local pipeline that either bootstraps local Codex/Claude/Kimi nodes through `kimi`, runs local `kimi` nodes, or routes local Claude nodes through Kimi-compatible provider settings, AgentFlow now runs the same local preflight as `agentflow smoke` by default. Use `--preflight never` when you intentionally want to bypass those readiness checks.
 Add `--show-preflight` when you want `run` to print the successful local preflight summary before execution starts. That summary is written to stderr so `--output json` and `--output json-summary` remain machine-readable on stdout, and it now also explains why auto preflight ran plus the matching node bootstrap sources when available.
 
@@ -207,6 +208,7 @@ make probe-claude-local
 That shortcut keeps the same `bash -lic` plus `kimi` bootstrap as the bundled smoke, but it sends a single minimal `claude -p` request with tools disabled so provider-side failures such as Kimi membership or billing errors surface immediately and with the raw API error text before you burn time on a larger smoke run. Those failures now also include the same `Diagnosis:` line, and membership-style `402` responses are called out explicitly as upstream account-state problems rather than local bootstrap regressions.
 
 By default, `agentflow smoke` now prints a compact per-node summary instead of the full run record JSON. Use `agentflow smoke --output json-summary` when you want a compact machine-readable payload for scripts, or `agentflow smoke --output json` when you want the complete persisted run record with stdout, stderr, and trace details.
+Those summary forms also add the same provider-side `Diagnosis:` hint when a node surfaces a recognizable upstream API rejection, so live smoke failures can call out account-state issues without switching to the full JSON or raw artifacts first.
 Add `--show-preflight` when you want `smoke` to print the successful local readiness summary before the run starts. AgentFlow writes that extra summary to stderr so JSON stdout stays safe for wrappers and scripts, and it now includes the auto-preflight reason plus matched node bootstrap sources when available.
 
 Manage persisted runs from the CLI without opening the web UI:
