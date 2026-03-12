@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
+import os
 from pathlib import Path
 
 from agentflow.agents.base import AgentAdapter
@@ -10,46 +10,53 @@ from agentflow.prepared import ExecutionPaths, PreparedExecution
 from agentflow.specs import NodeSpec
 
 
-def default_kimi_executable(paths: ExecutionPaths) -> str:
-    current_python = Path(sys.executable).expanduser() if sys.executable else None
-    repo_venv_python = paths.app_root / ".venv" / "bin" / "python"
-
-    if repo_venv_python.is_file() and current_python is not None:
-        try:
-            current_python.relative_to(repo_venv_python.parent.parent)
-        except ValueError:
-            return str(repo_venv_python)
-
-    if current_python is not None:
-        return str(current_python)
-    return "python3"
-
-
 class KimiAdapter(AgentAdapter):
     def prepare(self, node: NodeSpec, prompt: str, paths: ExecutionPaths) -> PreparedExecution:
         provider = self.provider_config(node.provider, node.agent)
-        request = {
-            "prompt": prompt,
-            "model": node.model or "kimi-k2-turbo-preview",
-            "provider": (provider.model_dump(mode="json") if provider else {"name": "moonshot", "base_url": "https://api.moonshot.ai/v1", "api_key_env": "KIMI_API_KEY", "env": {}}),
-            "tools_mode": node.tools.value,
-            "working_dir": paths.target_workdir,
-            "capture": node.capture.value,
-            "skills": node.skills,
-            "mcps": [mcp.model_dump(mode="json") for mcp in node.mcps],
-            "timeout_seconds": node.timeout_seconds,
-        }
-        relative_path = self.relative_runtime_file("kimi-request.json")
-        runtime_files = {relative_path: json.dumps(request, ensure_ascii=False, indent=2)}
-        executable = node.executable or default_kimi_executable(paths)
+        executable = node.executable or "kimi"
         command = [
             executable,
-            "-m",
-            "agentflow.remote.kimi_bridge",
-            str(Path(paths.target_runtime_dir) / relative_path),
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--yolo",
+            "-p",
+            prompt,
         ]
+        if node.model:
+            command.extend(["--model", node.model])
+        runtime_files: dict[str, str] = {}
+        if node.mcps:
+            mcp_payload: dict[str, object] = {"mcpServers": {}}
+            for mcp in node.mcps:
+                inner: dict[str, object] = {}
+                if mcp.transport == "stdio":
+                    if mcp.command:
+                        inner["command"] = mcp.command
+                    if mcp.args:
+                        inner["args"] = mcp.args
+                    if mcp.env:
+                        inner["env"] = mcp.env
+                else:
+                    if mcp.url:
+                        inner["url"] = mcp.url
+                    if mcp.headers:
+                        inner["headers"] = mcp.headers
+                    inner["transport"] = "streamable_http"
+                mcp_payload["mcpServers"][mcp.name] = inner
+            relative_path = self.relative_runtime_file("kimi-mcp.json")
+            runtime_files[relative_path] = json.dumps(mcp_payload, ensure_ascii=False, indent=2)
+            command.extend(["--mcp-config-file", str(Path(paths.target_runtime_dir) / relative_path)])
         command.extend(node.extra_args)
         env = merge_env_layers(getattr(provider, "env", None), node.env)
+        if provider:
+            if provider.api_key_env:
+                if provider.api_key_env in env:
+                    api_key = env[provider.api_key_env]
+                else:
+                    api_key = os.getenv(provider.api_key_env)
+                if api_key is not None:
+                    env.setdefault("KIMI_API_KEY", api_key)
         return PreparedExecution(
             command=command,
             env=env,
