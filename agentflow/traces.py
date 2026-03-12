@@ -186,6 +186,39 @@ class KimiTraceParser(BaseTraceParser):
     def supports_raw_stdout_fallback(self) -> bool:
         return False
 
+    def _feed_message(self, payload: dict[str, Any]) -> list[NormalizedTraceEvent]:
+        """Handle kimi CLI stream-json Message format (role/content)."""
+        role = payload.get("role", "")
+        events: list[NormalizedTraceEvent] = []
+        if role == "assistant":
+            content = payload.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        part_type = part.get("type", "text")
+                        text = _stringify(part)
+                        if part_type == "text" and text:
+                            self.remember(text)
+                        events.append(self.emit(part_type, f"{part_type.title()} part", text, payload))
+            elif isinstance(content, str) and content:
+                self.remember(content)
+                events.append(self.emit("text", "Text part", content, payload))
+            tool_calls = payload.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for tc in tool_calls:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    name = fn.get("name", "tool")
+                    events.append(self.emit("toolcall", f"ToolCall: {name}", _stringify(fn.get("arguments")), payload))
+        elif role == "tool":
+            text = _stringify(payload.get("content"))
+            events.append(self.emit("toolresult", "ToolResult", text, payload))
+        else:
+            text = _stringify(payload)
+            if text:
+                self.remember(text)
+            events.append(self.emit("event", str(role or "kimi"), text, payload))
+        return events
+
     def feed(self, line: str) -> list[NormalizedTraceEvent]:
         payload = _json(line)
         if payload is None:
@@ -193,6 +226,11 @@ class KimiTraceParser(BaseTraceParser):
             self.remember(text)
             return [self.emit("stdout", "stdout", text, line)] if text else []
 
+        # kimi CLI stream-json outputs Message objects with a "role" field
+        if "role" in payload:
+            return self._feed_message(payload)
+
+        # Legacy Wire protocol format (type/payload envelope, optionally wrapped in JSON-RPC 2.0)
         event_type = payload.get("type")
         inner = payload
         if payload.get("jsonrpc") == "2.0":
