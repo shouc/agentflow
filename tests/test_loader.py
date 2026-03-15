@@ -500,3 +500,31 @@ nodes:
     assert pipeline.nodes[3].prompt == "shard sqlite ubsan"
     assert pipeline.nodes[0].target.cwd == str((workspace / "agents" / "libpng" / "asan" / "0").resolve())
     assert pipeline.nodes[3].target.cwd == str((workspace / "agents" / "sqlite" / "ubsan" / "3").resolve())
+
+
+def test_load_pipeline_from_text_expands_fanout_preset_before_resolving_relative_cwds(tmp_path):
+    workspace = tmp_path / "workspace"
+    pipeline = load_pipeline_from_text(
+        """name: fanout-preset-loader
+working_dir: .
+nodes:
+  - id: fuzz
+    fanout:
+      as: shard
+      preset:
+        name: browser-surface
+        bucket_count: 1
+    agent: codex
+    prompt: shard {{ shard.label }}
+    target:
+      kind: local
+      cwd: "{{ shard.workspace }}"
+""",
+        base_dir=workspace,
+    )
+
+    assert len(pipeline.fanouts["fuzz"]) == 16
+    assert pipeline.fanouts["fuzz"][:3] == ["fuzz_00", "fuzz_01", "fuzz_02"]
+    assert pipeline.fanouts["fuzz"][-1] == "fuzz_15"
+    assert pipeline.nodes[0].target.cwd == str((workspace / "agents" / "blink_asan_seed_001_00").resolve())
+    assert pipeline.nodes[-1].target.cwd == str((workspace / "agents" / "libwebp_ubsan_seed_001_15").resolve())

@@ -8,6 +8,7 @@ from agentflow import (
     DAG,
     claude,
     codex,
+    codex_fuzz_campaign,
     codex_fuzz_campaign_matrix,
     codex_fuzz_campaign_preset_names,
     fanout_batches,
@@ -328,6 +329,99 @@ def test_airflow_like_dag_supports_codex_fuzz_campaign_matrix_helper():
     assert nodes["merge"].depends_on == spec.fanouts["batch_merge"]
 
 
+def test_codex_fuzz_campaign_registers_batched_pipeline_with_defaults():
+    with DAG("campaign-helper", working_dir="/tmp/campaign-helper", concurrency=16, fail_fast=True) as dag:
+        campaign = codex_fuzz_campaign(
+            preset="browser-surface",
+            bucket_count=2,
+            layout="batched",
+            batch_size=4,
+        )
+
+    spec = dag.to_spec()
+    nodes = spec.node_map
+
+    assert campaign.reducer is not None
+    assert campaign.init.id == "init"
+    assert campaign.fuzzer.id == "fuzzer"
+    assert campaign.reducer.id == "batch_merge"
+    assert campaign.merge.id == "merge"
+    assert spec.fail_fast is True
+    assert len(spec.fanouts["fuzzer"]) == 32
+    assert len(spec.fanouts["batch_merge"]) == 8
+    assert nodes["init"].tools == "read_write"
+    assert nodes["init"].success_criteria[0].value == "INIT_OK"
+    assert nodes["fuzzer_00"].fanout_member["target"] == "blink"
+    assert nodes["fuzzer_00"].fanout_member["label"] == "blink / asan / parser / seed_001"
+    assert nodes["fuzzer_00"].target.cwd == "agents/blink_asan_seed_001_00"
+    assert nodes["fuzzer_00"].extra_args == ["--search", "-c", 'model_reasoning_effort="high"']
+    assert nodes["batch_merge_0"].depends_on == spec.fanouts["fuzzer"][:4]
+    assert nodes["merge"].depends_on == spec.fanouts["batch_merge"]
+
+
+def test_codex_fuzz_campaign_supports_grouped_layout_and_prefix_overrides():
+    with DAG("campaign-helper-grouped", working_dir="/tmp/campaign-helper-grouped", concurrency=8) as dag:
+        campaign = codex_fuzz_campaign(
+            preset="protocol-stack",
+            bucket_count=1,
+            layout="grouped",
+            task_prefix="protocol",
+            campaign_label="protocol-stack",
+            fuzzer_kwargs={"timeout_seconds": 7200, "env": {"FUZZ_MODE": "strict"}},
+            merge_kwargs={"description": "grouped merge"},
+        )
+
+    spec = dag.to_spec()
+    nodes = spec.node_map
+
+    assert campaign.reducer is not None
+    assert campaign.init.id == "protocol_init"
+    assert campaign.fuzzer.id == "protocol_fuzzer"
+    assert campaign.reducer.id == "protocol_family_merge"
+    assert campaign.merge.id == "protocol_merge"
+    assert len(spec.fanouts["protocol_fuzzer"]) == 16
+    assert len(spec.fanouts["protocol_family_merge"]) == 4
+    assert nodes["protocol_fuzzer_00"].fanout_member["target"] == "c-ares"
+    assert nodes["protocol_fuzzer_00"].target.cwd == "agents/c-ares_asan_seed_001_00"
+    assert nodes["protocol_fuzzer_00"].timeout_seconds == 7200
+    assert nodes["protocol_fuzzer_00"].env == {"FUZZ_MODE": "strict"}
+    assert nodes["protocol_family_merge_0"].depends_on == spec.fanouts["protocol_fuzzer"][:4]
+    assert nodes["protocol_merge"].depends_on == spec.fanouts["protocol_family_merge"]
+    assert nodes["protocol_merge"].description == "grouped merge"
+
+
+def test_codex_fuzz_campaign_uses_custom_shared_paths_in_init_and_fuzzer_prompts():
+    with DAG("campaign-helper-paths", working_dir="/tmp/campaign-helper-paths") as dag:
+        campaign = codex_fuzz_campaign(
+            preset="browser-surface",
+            bucket_count=1,
+            layout="flat",
+            crash_registry_path="reports/crashes.md",
+            notes_path="notes/campaign.md",
+        )
+
+    spec = dag.to_spec()
+    nodes = spec.node_map
+
+    assert "mkdir -p crashes reports notes" in nodes["init"].prompt
+    assert "If reports/crashes.md is missing or empty" in nodes["init"].prompt
+    assert "If notes/campaign.md is missing or empty" in nodes["init"].prompt
+    assert "`reports/crashes.md`" in nodes["fuzzer_00"].prompt
+    assert "`notes/campaign.md`" in nodes["fuzzer_00"].prompt
+    assert campaign.reducer is None
+    assert nodes["merge"].depends_on == spec.fanouts["fuzzer"]
+
+
+def test_codex_fuzz_campaign_rejects_invalid_layout_and_reducer_overrides():
+    with pytest.raises(ValueError, match=r"`layout` must be one of"):
+        with DAG("invalid-layout") as dag:
+            codex_fuzz_campaign(layout="missing")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match=r"`reducer_prompt` and `reducer_kwargs` are only valid"):
+        with DAG("invalid-flat") as dag:
+            codex_fuzz_campaign(layout="flat", reducer_kwargs={"timeout_seconds": 42})
+
+
 def test_airflow_like_dag_can_render_json_and_yaml():
     with DAG(
         "render-demo",
@@ -509,3 +603,28 @@ def test_airflow_like_fuzz_preset_batched_example_emits_valid_pipeline():
     )
     assert spec.node_map["batch_merge_0"].depends_on == spec.fanouts["fuzzer"][:16]
     assert spec.node_map["merge"].depends_on == spec.fanouts["batch_merge"]
+
+
+def test_airflow_like_fuzz_campaign_helper_example_emits_valid_pipeline():
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, str(repo_root / "examples" / "airflow_like_fuzz_campaign.py")],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+
+    spec = load_pipeline_from_text(completed.stdout, base_dir=repo_root)
+
+    assert spec.name == "airflow-like-fuzz-campaign-helper-128"
+    assert spec.fail_fast is True
+    assert spec.concurrency == 32
+    assert len(spec.fanouts["fuzzer"]) == 128
+    assert len(spec.fanouts["family_merge"]) == 4
+    assert spec.node_map["fuzzer_000"].fanout_member["target"] == "c-ares"
+    assert spec.node_map["fuzzer_000"].target.cwd.endswith(
+        "/codex_fuzz_python_campaign_helper_128/agents/c-ares_asan_seed_001_000"
+    )
+    assert spec.node_map["family_merge_0"].depends_on == spec.fanouts["fuzzer"][:32]
+    assert spec.node_map["merge"].depends_on == spec.fanouts["family_merge"]

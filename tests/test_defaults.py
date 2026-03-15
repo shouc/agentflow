@@ -85,6 +85,16 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert by_name["codex-fuzz-browser-128"].example_name == "fuzz/codex-fuzz-browser-128.yaml"
     assert "browser-surface" in by_name["codex-fuzz-browser-128"].description
     assert by_name["codex-fuzz-browser-128"].support_files == ("manifests/codex-fuzz-browser-128.axes.yaml",)
+    assert by_name["codex-fuzz-preset-batched"].example_name == "fuzz/codex-fuzz-preset-batched.yaml"
+    assert "fanout.preset" in by_name["codex-fuzz-preset-batched"].description
+    assert tuple(parameter.name for parameter in by_name["codex-fuzz-preset-batched"].parameters) == (
+        "preset",
+        "bucket_count",
+        "batch_size",
+        "concurrency",
+        "name",
+        "working_dir",
+    )
     assert by_name["codex-fuzz-catalog"].example_name == "fuzz/codex-fuzz-catalog.yaml"
     assert "CSV shard catalog" in by_name["codex-fuzz-catalog"].description
     assert by_name["codex-fuzz-catalog"].support_files == ("manifests/codex-fuzz-catalog.csv",)
@@ -616,6 +626,73 @@ def test_bundled_codex_fuzz_browser_128_template_matches_default_example_files()
     assert len(rendered.support_files) == 1
     assert rendered.support_files[0].relative_path == "manifests/codex-fuzz-browser-128.axes.yaml"
     assert rendered.support_files[0].content == expected_axes
+
+
+def test_bundled_codex_fuzz_preset_batched_template_is_available():
+    assert "codex-fuzz-preset-batched" in bundled_template_names()
+    assert "\nname: codex-fuzz-preset-batched-128\n" in f"\n{load_bundled_template_yaml('codex-fuzz-preset-batched')}"
+
+
+def test_bundled_codex_fuzz_preset_batched_template_matches_default_example_file():
+    expected = bundled_template_path("codex-fuzz-preset-batched").read_text(encoding="utf-8")
+
+    assert load_bundled_template_yaml("codex-fuzz-preset-batched") == expected
+
+
+def test_bundled_codex_fuzz_preset_batched_template_accepts_overrides_and_expands_native_preset(tmp_path):
+    rendered = load_bundled_template_yaml(
+        "codex-fuzz-preset-batched",
+        values={
+            "preset": "protocol-stack",
+            "bucket_count": "3",
+            "batch_size": "6",
+            "concurrency": "12",
+            "name": "custom-preset-batched-48",
+            "working_dir": "./custom_preset_batched",
+        },
+    )
+
+    assert "name: custom-preset-batched-48\n" in rendered
+    assert "working_dir: ./custom_preset_batched\n" in rendered
+    assert "concurrency: 12\n" in rendered
+    assert "name: protocol-stack" in rendered
+    assert "bucket_count: 3" in rendered
+    assert "size: 6" in rendered
+    assert "Treat the built-in preset metadata as the source of truth" in rendered
+    assert "{{ current.scope.ids | join(\", \") }}" in rendered
+
+    pipeline_path = tmp_path / "custom-preset-batched.yaml"
+    pipeline_path.write_text(rendered, encoding="utf-8")
+    pipeline = load_pipeline_from_path(str(pipeline_path))
+
+    assert pipeline.concurrency == 12
+    assert len(pipeline.fanouts["fuzzer"]) == 48
+    assert pipeline.fanouts["fuzzer"][:3] == ["fuzzer_00", "fuzzer_01", "fuzzer_02"]
+    assert pipeline.fanouts["fuzzer"][-1] == "fuzzer_47"
+    assert pipeline.node_map["fuzzer_00"].fanout_member["target"] == "c-ares"
+    assert pipeline.node_map["fuzzer_12"].fanout_member["target"] == "nghttp2"
+    assert pipeline.node_map["fuzzer_00"].fanout_member["label"] == "c-ares / asan / parser / seed_001"
+    assert pipeline.node_map["fuzzer_47"].fanout_member["workspace"] == "agents/openssl_ubsan_seed_003_47"
+    assert pipeline.node_map["fuzzer_00"].target.cwd.endswith("custom_preset_batched/agents/c-ares_asan_seed_001_00")
+    assert pipeline.fanouts["batch_merge"] == [
+        "batch_merge_0",
+        "batch_merge_1",
+        "batch_merge_2",
+        "batch_merge_3",
+        "batch_merge_4",
+        "batch_merge_5",
+        "batch_merge_6",
+        "batch_merge_7",
+    ]
+    assert pipeline.node_map["batch_merge_0"].depends_on == [
+        "fuzzer_00",
+        "fuzzer_01",
+        "fuzzer_02",
+        "fuzzer_03",
+        "fuzzer_04",
+        "fuzzer_05",
+    ]
+    assert pipeline.node_map["merge"].depends_on == pipeline.fanouts["batch_merge"]
 
 
 def test_bundled_codex_fuzz_catalog_template_is_available():
@@ -1285,6 +1362,39 @@ def test_bundled_codex_fuzz_browser_128_pipeline_expands_into_128_browser_surfac
     assert pipeline.node_map["fuzzer_000"].target.cwd.endswith("codex_fuzz_browser_128/agents/blink_asan_seed_001_000")
     assert pipeline.node_map["merge"].depends_on[0] == "fuzzer_000"
     assert pipeline.node_map["merge"].depends_on[-1] == "fuzzer_127"
+
+
+def test_bundled_codex_fuzz_preset_batched_pipeline_expands_into_scoped_batch_reducers():
+    pipeline = load_pipeline_from_path(str(bundled_template_path("codex-fuzz-preset-batched")))
+
+    assert pipeline.concurrency == 32
+    assert len(pipeline.fanouts["fuzzer"]) == 128
+    assert pipeline.fanouts["fuzzer"][:3] == ["fuzzer_000", "fuzzer_001", "fuzzer_002"]
+    assert pipeline.fanouts["fuzzer"][-1] == "fuzzer_127"
+    assert pipeline.node_map["fuzzer_000"].fanout_member["target"] == "libpng"
+    assert pipeline.node_map["fuzzer_000"].fanout_member["label"] == "libpng / asan / parser / seed_001"
+    assert pipeline.node_map["fuzzer_032"].fanout_member["target"] == "libjpeg"
+    assert pipeline.node_map["fuzzer_127"].fanout_member["bucket"] == "seed_008"
+    assert pipeline.node_map["fuzzer_000"].target.cwd.endswith(
+        "codex_fuzz_preset_batched_128/agents/libpng_asan_seed_001_000"
+    )
+    assert pipeline.fanouts["batch_merge"] == [
+        "batch_merge_0",
+        "batch_merge_1",
+        "batch_merge_2",
+        "batch_merge_3",
+        "batch_merge_4",
+        "batch_merge_5",
+        "batch_merge_6",
+        "batch_merge_7",
+    ]
+    assert pipeline.node_map["batch_merge_0"].fanout_member["member_ids"][:3] == [
+        "fuzzer_000",
+        "fuzzer_001",
+        "fuzzer_002",
+    ]
+    assert pipeline.node_map["batch_merge_7"].fanout_member["member_ids"][-1] == "fuzzer_127"
+    assert pipeline.node_map["merge"].depends_on == pipeline.fanouts["batch_merge"]
 
 
 def test_bundled_codex_fuzz_catalog_pipeline_expands_into_128_concrete_nodes():

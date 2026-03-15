@@ -574,6 +574,8 @@ def test_templates_command_lists_bundled_templates():
         "(assets: `manifests/codex-fuzz-matrix-manifest-128.axes.yaml`; source: `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml`; use: `agentflow init --template codex-fuzz-matrix-manifest-128`)\n"
         "- codex-fuzz-browser-128: 128-shard browser-surface Codex fuzz matrix generated from the `browser-surface` preset. "
         "(assets: `manifests/codex-fuzz-browser-128.axes.yaml`; source: `examples/fuzz/codex-fuzz-browser-128.yaml`; use: `agentflow init --template codex-fuzz-browser-128`)\n"
+        "- codex-fuzz-preset-batched: Configurable preset-backed Codex fuzz campaign that uses native `fanout.preset` plus `fanout.batches` to keep large 128-shard runs in one YAML file. "
+        "(params: `preset=oss-fuzz-core`, `bucket_count=8`, `batch_size=16`, `concurrency=32`, `name=codex-fuzz-preset-batched-<shards>`, `working_dir=./codex_fuzz_preset_batched_<shards>`; source: `examples/fuzz/codex-fuzz-preset-batched.yaml`; use: `agentflow init --template codex-fuzz-preset-batched`)\n"
         "- codex-fuzz-catalog: Configurable Codex fuzz campaign backed by a preset-generated CSV shard catalog; defaults to 128 shards and keeps per-shard labels and workdirs in the manifest. "
         "(params: `preset=oss-fuzz-core`, `shards=128`, `concurrency=32`, `name=codex-fuzz-catalog-<shards>`, `working_dir=./codex_fuzz_catalog_<shards>`; assets: `manifests/codex-fuzz-catalog.csv`; source: `examples/fuzz/codex-fuzz-catalog.yaml`; use: `agentflow init --template codex-fuzz-catalog`)\n"
         "- codex-fuzz-catalog-batched: Configurable Codex fuzz campaign backed by a preset-generated CSV shard catalog with neutral `fanout.batches` reducers for large explicit shard rosters. "
@@ -607,7 +609,7 @@ def test_template_presets_command_lists_bundled_presets():
         "(targets: `blink/html`, `v8/js`, `woff2/fonts`, `libwebp/webp`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`)\n"
         "- protocol-stack: Protocol and transport libraries across DNS, HTTP/2, QUIC, and TLS inputs. "
         "(targets: `c-ares/dns`, `nghttp2/http2`, `quiche/quic`, `openssl/tls`; strategies: `asan/parser`, `asan/structure-aware`, `ubsan/differential`, `ubsan/stateful`)\n"
-        "Templates supporting `preset=`: `codex-fuzz-hierarchical-grouped`, `codex-fuzz-hierarchical-manifest`, `codex-fuzz-matrix-manifest`, `codex-fuzz-catalog`, `codex-fuzz-catalog-batched`, `codex-fuzz-catalog-grouped`\n"
+        "Templates supporting `preset=`: `codex-fuzz-hierarchical-grouped`, `codex-fuzz-hierarchical-manifest`, `codex-fuzz-matrix-manifest`, `codex-fuzz-preset-batched`, `codex-fuzz-catalog`, `codex-fuzz-catalog-batched`, `codex-fuzz-catalog-grouped`\n"
     )
 
 
@@ -739,6 +741,41 @@ def test_init_command_writes_browser_template_and_support_files_to_destination(t
     support_text = support_file.read_text(encoding="utf-8")
     assert "  - target: blink" in support_text
     assert "  - target: libwebp" in support_text
+
+
+def test_init_command_writes_preset_batched_template_to_destination(tmp_path):
+    destination = tmp_path / "templates" / "fuzz-preset-batched.yaml"
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            str(destination),
+            "--template",
+            "codex-fuzz-preset-batched",
+            "--set",
+            "preset=protocol-stack",
+            "--set",
+            "bucket_count=3",
+            "--set",
+            "batch_size=6",
+            "--set",
+            "concurrency=12",
+            "--set",
+            "name=custom-preset-batched-48",
+            "--set",
+            "working_dir=./custom_preset_batched",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == f"Wrote `codex-fuzz-preset-batched` template to `{destination}`.\n"
+    rendered_yaml = destination.read_text(encoding="utf-8")
+    assert "\nname: custom-preset-batched-48\n" in f"\n{rendered_yaml}"
+    assert "concurrency: 12" in rendered_yaml
+    assert "name: protocol-stack" in rendered_yaml
+    assert "bucket_count: 3" in rendered_yaml
+    assert "size: 6" in rendered_yaml
 
 
 def test_init_command_writes_hierarchical_template_and_support_files_to_destination(tmp_path):

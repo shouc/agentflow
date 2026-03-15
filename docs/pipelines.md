@@ -42,7 +42,7 @@ See `examples/airflow_like.py` for the small static DAG, `examples/airflow_like_
 Each node supports:
 
 - `agent`: `codex`, `claude`, or `kimi`
-- `fanout`: expand one node definition into concrete nodes before validation; accepts `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, or `batches`, plus optional `as`, `derive`, and matrix-only `include` / `exclude`
+- `fanout`: expand one node definition into concrete nodes before validation; accepts `count`, `values`, `values_path`, `matrix`, `matrix_path`, `preset`, `group_by`, or `batches`, plus optional `as`, `derive`, and matrix-only `include` / `exclude`
 - `model`: any model string understood by the backend
 - `provider`: a string or a structured provider config with `base_url`, `api_key_env`, headers, and env
 - `tools`: `read_only` or `read_write`
@@ -120,6 +120,7 @@ agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarch
 agentflow init fuzz-hierarchical.yaml --template codex-fuzz-hierarchical-manifest
 agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-manifest --set bucket_count=8 --set concurrency=32
 agentflow init fuzz-hierarchical-128.yaml --template codex-fuzz-hierarchical-128
+agentflow init fuzz-preset-batched.yaml --template codex-fuzz-preset-batched
 agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog
 agentflow init fuzz-catalog-batched.yaml --template codex-fuzz-catalog-batched
 agentflow init fuzz-catalog-grouped.yaml --template codex-fuzz-catalog-grouped
@@ -127,7 +128,7 @@ agentflow init fuzz-batched.yaml --template codex-fuzz-batched
 agentflow inspect fuzz-128.yaml --output summary
 ```
 
-The checked-in [`examples/fuzz/fuzz_codex_32.yaml`](/home/shou/agentflow/examples/fuzz/fuzz_codex_32.yaml) file is the default 32-shard starter rendered by that template. [`examples/codex-repo-sweep-batched.yaml`](/home/shou/agentflow/examples/codex-repo-sweep-batched.yaml) is the parallel maintainer-review counterpart when you want a large non-fuzz Codex sweep with `node_defaults`, `agent_defaults`, and `fanout.batches`. [`examples/fuzz/fuzz_codex_128.yaml`](/home/shou/agentflow/examples/fuzz/fuzz_codex_128.yaml) remains the fixed large-fanout reference when you want to inspect a full 128-node spec directly from the repo. When you want the same 128-shard scale with the axis catalog split into a support file, inspect [`examples/fuzz/codex-fuzz-matrix-manifest-128.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-matrix-manifest-128.yaml).
+The checked-in [`examples/fuzz/fuzz_codex_32.yaml`](/home/shou/agentflow/examples/fuzz/fuzz_codex_32.yaml) file is the default 32-shard starter rendered by that template. [`examples/codex-repo-sweep-batched.yaml`](/home/shou/agentflow/examples/codex-repo-sweep-batched.yaml) is the parallel maintainer-review counterpart when you want a large non-fuzz Codex sweep with `node_defaults`, `agent_defaults`, and `fanout.batches`. [`examples/fuzz/fuzz_codex_128.yaml`](/home/shou/agentflow/examples/fuzz/fuzz_codex_128.yaml) remains the fixed large-fanout reference when you want to inspect a full 128-node spec directly from the repo. When you want the same 128-shard scale with the axis catalog split into a support file, inspect [`examples/fuzz/codex-fuzz-matrix-manifest-128.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-matrix-manifest-128.yaml). When that roster already matches one of AgentFlow's built-in fuzz campaign presets and you want the same staged-reducer shape without sidecar manifests, start from [`examples/fuzz/codex-fuzz-preset-batched.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-preset-batched.yaml) or `agentflow init fuzz-preset-batched.yaml --template codex-fuzz-preset-batched`.
 When that same staged-reducer pattern should stay maintainable and the reducer roster can be derived from shard metadata already in the fanout, start from [`examples/fuzz/codex-fuzz-hierarchical-grouped.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-hierarchical-grouped.yaml) or `agentflow init fuzz-hierarchical-grouped.yaml --template codex-fuzz-hierarchical-grouped`, which keep only the shard axes manifest and derive per-family reducers through `fanout.group_by`; each grouped reducer now gets scoped dependencies plus `current.member_ids` and `current.members`, so it can summarize only its matching shard family without re-filtering the full fanout. Raise `--set bucket_count=8 --set concurrency=32` when you want that same sidecar-manifest pattern at 128 shards without hand-editing a second roster file. When reducers need an explicitly maintainer-owned roster that can diverge from the shard axes, start from [`examples/fuzz/codex-fuzz-hierarchical-manifest.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-hierarchical-manifest.yaml) or `agentflow init fuzz-hierarchical.yaml --template codex-fuzz-hierarchical-manifest`, which render both the shard axes manifest and the family reducer roster from one scaffold. [`examples/fuzz/codex-fuzz-hierarchical-128.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-hierarchical-128.yaml) remains the fixed 128-shard staged reducer reference that summarizes each target family before the final maintainer merge by using the `fanouts.<group>.summary`, `completed`, `failed`, and `with_output` prompt helpers. When a homogeneous 128-shard swarm wants the same readability without a second family roster, start from [`examples/fuzz/codex-fuzz-batched.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-batched.yaml) or `agentflow init fuzz-batched.yaml --template codex-fuzz-batched`, which use `fanout.batches` to insert scoped intermediate reducers automatically. When the same neutral staged-reducer pattern should start from a spreadsheet-friendly shard catalog instead of a homogeneous swarm, use [`examples/fuzz/codex-fuzz-catalog-batched.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-catalog-batched.yaml) or `agentflow init fuzz-catalog-batched.yaml --template codex-fuzz-catalog-batched`. The manifest-backed single-reducer scaffold still lives at [`examples/fuzz/codex-fuzz-matrix-manifest.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-matrix-manifest.yaml) and is the default output of `agentflow init fuzz-matrix-manifest.yaml --template codex-fuzz-matrix-manifest`. When the same staged-reducer flow should start from a spreadsheet-friendly shard catalog instead of reusable axes and reducer families do matter, use [`examples/fuzz/codex-fuzz-catalog-grouped.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-catalog-grouped.yaml) or `agentflow init fuzz-catalog-grouped.yaml --template codex-fuzz-catalog-grouped`.
 
 When each shard needs its own structured metadata, use `fanout.values` instead of `count`:
@@ -175,6 +176,26 @@ nodes:
     prompt: |
       Fuzz {{ shard.label }} inside {{ shard.workspace }}.
 ```
+
+When the shard roster already matches a built-in fuzz campaign preset such as `browser-surface` or `protocol-stack`, use `fanout.preset` to expand that matrix directly in YAML without rendering a sidecar manifest first:
+
+```yaml
+nodes:
+  - id: fuzz
+    fanout:
+      as: shard
+      preset:
+        name: browser-surface
+        bucket_count: 8
+    agent: codex
+    target:
+      kind: local
+      cwd: "{{ shard.workspace }}"
+    prompt: |
+      Fuzz {{ shard.label }} inside {{ shard.workspace }}.
+```
+
+`fanout.preset` expands the same family/strategy/seed-bucket roster as `codex_fuzz_campaign_matrix(...)`, including default `label` and `workspace` fields. Add outer `fanout.derive` when you want to override or extend those computed values, and pair it with `fanout.batches` when 128-shard runs should stay readable in a single YAML file. The bundled [`examples/fuzz/codex-fuzz-preset-batched.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-preset-batched.yaml) example demonstrates that pattern.
 
 For large fan-outs, prompt rendering also exposes reducer-friendly fanout subsets and counts. `fanouts.<group>.summary` carries per-status totals plus `with_output` / `without_output`, while `fanouts.<group>.completed`, `failed`, `with_output`, and `without_output` each expose the same `ids`, `size`, `nodes`, `outputs`, `final_responses`, `statuses`, and `values` fields as the full group.
 
@@ -355,15 +376,16 @@ nodes:
 
 Expansion rules:
 
-- A fan-out node accepts exactly one expansion mode: `count` for homogeneous numeric shards, `values` or `values_path` for explicit per-member metadata, or `matrix` or `matrix_path` for cartesian-product sweeps.
+- A fan-out node accepts exactly one expansion mode: `count` for homogeneous numeric shards, `values` or `values_path` for explicit per-member metadata, `matrix` or `matrix_path` for cartesian-product sweeps, or `preset` for built-in fuzz campaign rosters.
 - A fan-out node with `id: fuzz` and `count: 8` expands to `fuzz_0` through `fuzz_7`. The suffix is zero-padded when the fan-out size needs it, so `count: 128` becomes `fuzz_000` through `fuzz_127`.
 - When `fanout.values` is used, `count` becomes the list length, `value` holds the raw item, and dictionary item keys with identifier-friendly names are also exposed directly on the alias. That lets `{{ shard.value.seed }}` and `{{ shard.seed }}` both work for `values: [{seed: 1101}]`.
 - `fanout.values_path` behaves the same way after AgentFlow loads the referenced list or CSV rows.
 - When `fanout.matrix` is used, AgentFlow expands the cartesian product of every axis in declaration order. Each axis item is available under its axis name, and dictionary axis items also lift their identifier-friendly keys onto the alias. That lets `{{ shard.family.target }}` and `{{ shard.target }}` both work when `family` axis items are dictionaries.
 - `fanout.matrix_path` behaves the same way after AgentFlow loads the referenced JSON/YAML object.
+- `fanout.preset` expands the built-in family/strategy/seed-bucket roster for the selected fuzz campaign preset and injects the same default `label` / `workspace` fields that `codex_fuzz_campaign_matrix(...)` would generate.
 - `fanout.exclude` removes matrix members whose metadata matches every field in a selector object. Selectors can match lifted fields such as `target` / `focus` or nested axis objects such as `family.target`.
 - `fanout.include` appends explicit matrix-style members after exclusions, which is useful for bespoke shards or for adding back one-off combinations without rewriting the whole campaign as a catalog.
-- `fanout.derive` can add computed member fields after the base `count`, `values`, `values_path`, `matrix`, or `matrix_path` expansion has been resolved. Derived fields render in declaration order, so later derived fields can reference earlier ones.
+- `fanout.derive` can add computed member fields after the base `count`, `values`, `values_path`, `matrix`, `matrix_path`, or `preset` expansion has been resolved. Derived fields render in declaration order, so later derived fields can reference earlier ones.
 - `fanout.as` picks the template variable name for pre-validation substitution. AgentFlow currently expands dotted placeholders rooted at that alias or `fanout`, such as `{{ shard.number }}`, `{{ shard.suffix }}`, `{{ fanout.count }}`, `target.cwd: agents/agent_{{ shard.suffix }}`, or `depends_on: ["prepare_{{ shard.suffix }}"]`.
 - Ordinary runtime prompt templates such as `{{ nodes.prepare.output }}` are left intact and still render at execution time.
 - A downstream `depends_on: [fuzz]` expands to all members of the `fuzz` group.

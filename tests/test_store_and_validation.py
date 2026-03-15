@@ -997,6 +997,59 @@ variant:
     assert pipeline.node_map["merge"].depends_on == ["fuzz_0", "fuzz_1", "fuzz_2", "fuzz_3"]
 
 
+def test_pipeline_validation_expands_fanout_preset_nodes_and_group_dependencies():
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "fanout-preset-validation",
+            "working_dir": ".",
+            "nodes": [
+                {
+                    "id": "fuzz",
+                    "fanout": {
+                        "as": "shard",
+                        "preset": {
+                            "name": "browser-surface",
+                            "bucket_count": 2,
+                            "extra_axes": {
+                                "lane": ["renderer"]
+                            },
+                        },
+                        "derive": {
+                            "label": "{{ shard.target }}::{{ shard.bucket }}",
+                            "report": "reports/{{ shard.target }}_{{ shard.bucket }}.md",
+                        },
+                    },
+                    "agent": "codex",
+                    "prompt": "fuzz {{ shard.label }} in {{ shard.workspace }}",
+                    "target": {
+                        "kind": "local",
+                        "cwd": "{{ shard.workspace }}",
+                    },
+                },
+                {
+                    "id": "merge",
+                    "agent": "codex",
+                    "depends_on": ["fuzz"],
+                    "prompt": "merge",
+                },
+            ],
+        }
+    )
+
+    assert len(pipeline.fanouts["fuzz"]) == 32
+    assert pipeline.fanouts["fuzz"][:3] == ["fuzz_00", "fuzz_01", "fuzz_02"]
+    assert pipeline.fanouts["fuzz"][-1] == "fuzz_31"
+    assert pipeline.node_map["fuzz_00"].prompt == "fuzz blink::seed_001 in agents/blink_asan_seed_001_00"
+    assert pipeline.node_map["fuzz_00"].fanout_member["lane"] == "renderer"
+    assert pipeline.node_map["fuzz_00"].fanout_member["label"] == "blink::seed_001"
+    assert pipeline.node_map["fuzz_00"].fanout_member["report"] == "reports/blink_seed_001.md"
+    assert pipeline.node_map["fuzz_00"].target.cwd == "agents/blink_asan_seed_001_00"
+    assert pipeline.node_map["fuzz_15"].fanout_member["target"] == "v8"
+    assert pipeline.node_map["fuzz_15"].fanout_member["bucket"] == "seed_002"
+    assert pipeline.node_map["fuzz_31"].fanout_member["target"] == "libwebp"
+    assert pipeline.node_map["merge"].depends_on == pipeline.fanouts["fuzz"]
+
+
 def test_pipeline_validation_expands_curated_fanout_matrix_nodes_and_group_dependencies():
     pipeline = PipelineSpec.model_validate(
         {
@@ -1111,7 +1164,7 @@ def test_pipeline_validation_expands_curated_fanout_matrix_nodes_and_group_depen
 def test_pipeline_validation_rejects_fanout_with_multiple_expansion_modes():
     with pytest.raises(
         ValueError,
-        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, `batches`",
+        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `preset`, `group_by`, `batches`",
     ):
         PipelineSpec.model_validate(
             {
@@ -1140,7 +1193,7 @@ def test_pipeline_validation_rejects_fanout_with_mixed_inline_and_file_backed_mo
 
     with pytest.raises(
         ValueError,
-        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, `batches`",
+        match=r"fanout accepts exactly one of `count`, `values`, `values_path`, `matrix`, `matrix_path`, `preset`, `group_by`, `batches`",
     ):
         PipelineSpec.model_validate(
             {

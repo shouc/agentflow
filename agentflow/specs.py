@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 import yaml
 
+from agentflow.fuzz_presets import build_codex_fuzz_campaign_matrix_payload, codex_fuzz_campaign_preset_names
 from agentflow.local_shell import (
     invalid_bash_long_option_error,
     shell_init_commands,
@@ -85,7 +86,7 @@ _FANOUT_ALIAS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _FANOUT_RESERVED_CONTEXT_NAMES = {"fanout", "fanouts", "nodes", "pipeline", "current"}
 _FANOUT_MEMBER_RESERVED_NAMES = {"index", "number", "count", "suffix", "value", "template_id", "node_id"}
 _FANOUT_TEMPLATE_PATTERN = re.compile(r"{{\s*(?P<expr>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}")
-_FANOUT_EXPANSION_MODE_KEYS = ("count", "values", "values_path", "matrix", "matrix_path", "group_by", "batches")
+_FANOUT_EXPANSION_MODE_KEYS = ("count", "values", "values_path", "matrix", "matrix_path", "preset", "group_by", "batches")
 _NODE_DEFAULT_FORBIDDEN_FIELDS = {
     "id",
     "prompt",
@@ -499,6 +500,67 @@ class FanoutBatchesSpec(BaseModel):
         if not normalized:
             raise ValueError("`fanout.batches.from` must not be empty")
         return normalized
+
+
+class FanoutPresetSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    bucket_count: int | None = Field(default=None, ge=1)
+    label_template: str | None = None
+    workspace_template: str | None = None
+    seed_start: int | None = None
+    seed_label_prefix: str | None = None
+    seed_label_width: int | None = Field(default=None, ge=1)
+    extra_axes: dict[str, list[Any]] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def expand_string_shorthand(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"name": data}
+        return data
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("`fanout.preset.name` must not be empty")
+        available = codex_fuzz_campaign_preset_names()
+        if normalized not in available:
+            joined = ", ".join(f"`{name}`" for name in available)
+            raise ValueError(f"`fanout.preset.name` must be one of {joined}")
+        return normalized
+
+    @field_validator("bucket_count", "seed_start", "seed_label_width")
+    @classmethod
+    def validate_numeric_fields(cls, value: int | None, info: Any) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"`fanout.preset.{info.field_name}` must be an integer")
+        return value
+
+    @field_validator("seed_label_prefix")
+    @classmethod
+    def validate_seed_label_prefix(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("`fanout.preset.seed_label_prefix` must not be empty")
+        return value
+
+    @field_validator("extra_axes")
+    @classmethod
+    def validate_extra_axes(cls, value: dict[str, list[Any]] | None) -> dict[str, list[Any]] | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("`fanout.preset.extra_axes` must contain at least one axis")
+        return value
 
 
 class FanoutSpec(BaseModel):
@@ -999,6 +1061,45 @@ def _load_fanout_manifest_payload(path: Path) -> Any:
             raise ValueError(f"fanout manifest `{path}` could not be parsed as JSON or YAML") from exc
 
 
+def _resolve_fanout_preset_mode(raw_fanout: Any) -> Any:
+    if not isinstance(raw_fanout, dict):
+        return raw_fanout
+
+    updated = dict(raw_fanout)
+    raw_preset = updated.pop("preset", None)
+    if raw_preset is None:
+        return updated
+
+    preset = FanoutPresetSpec.model_validate(raw_preset)
+    preset_kwargs: dict[str, Any] = {}
+    if "name" in preset.model_fields_set:
+        preset_kwargs["preset"] = preset.name
+    if "bucket_count" in preset.model_fields_set:
+        preset_kwargs["bucket_count"] = preset.bucket_count
+    if "label_template" in preset.model_fields_set:
+        preset_kwargs["label_template"] = preset.label_template
+    if "workspace_template" in preset.model_fields_set:
+        preset_kwargs["workspace_template"] = preset.workspace_template
+    if "seed_start" in preset.model_fields_set:
+        preset_kwargs["seed_start"] = preset.seed_start
+    if "seed_label_prefix" in preset.model_fields_set:
+        preset_kwargs["seed_label_prefix"] = preset.seed_label_prefix
+    if "seed_label_width" in preset.model_fields_set:
+        preset_kwargs["seed_label_width"] = preset.seed_label_width
+    if "extra_axes" in preset.model_fields_set:
+        preset_kwargs["extra_axes"] = preset.extra_axes
+
+    payload = build_codex_fuzz_campaign_matrix_payload(**preset_kwargs)
+    updated["matrix"] = payload.matrix
+    if payload.derive is not None:
+        outer_derive = updated.get("derive")
+        if isinstance(outer_derive, dict):
+            updated["derive"] = {**payload.derive, **outer_derive}
+        elif outer_derive is None:
+            updated["derive"] = payload.derive
+    return updated
+
+
 def _resolve_fanout_manifest_modes(raw_fanout: Any, *, base_dir: Path | None) -> Any:
     if not isinstance(raw_fanout, dict):
         return raw_fanout
@@ -1142,6 +1243,7 @@ def expand_compact_nodes(payload: dict[str, Any], *, base_dir: str | Path | None
             continue
         saw_fanout = True
         resolved_fanout = _resolve_fanout_manifest_modes(raw_fanout, base_dir=resolved_base_dir)
+        resolved_fanout = _resolve_fanout_preset_mode(resolved_fanout)
         resolved_fanout = _resolve_fanout_source_modes(resolved_fanout, source_members=fanout_members)
         fanout = FanoutSpec.model_validate(resolved_fanout)
         rendered_nodes, member_ids = _expand_fanout_node(node, fanout)
