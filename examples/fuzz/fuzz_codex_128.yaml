@@ -1,0 +1,87 @@
+# 128-agent Codex fuzzing swarm
+#
+# This example demonstrates compact node fan-out for large local Codex swarms.
+# Tune `concurrency` to match the machine and account budget you actually have.
+#
+# Usage:
+#   agentflow inspect examples/fuzz/fuzz_codex_128.yaml
+#   agentflow run examples/fuzz/fuzz_codex_128.yaml --preflight never
+
+name: codex-fuzz-swarm-128
+description: Compact 128-agent Codex fuzzing swarm with shared init and reducer nodes.
+working_dir: ./codex_fuzz_swarm
+concurrency: 32
+
+nodes:
+  - id: init
+    agent: codex
+    tools: read_write
+    timeout_seconds: 60
+    prompt: |
+      Create the following directory structure silently if it does not already exist:
+        mkdir -p docs crashes locks agents
+      For each shard suffix from 000 through 127, create agents/agent_<suffix>.
+      If crashes/README.md is missing or empty, create it with:
+        # Crash Registry
+        | Timestamp | Shard | Target | Evidence | Artifact |
+        |---|---|---|---|---|
+      If docs/global_lessons.md is missing or empty, create it with:
+        # Shared Lessons
+        Use this file only for reusable campaign-wide notes.
+      Then respond with exactly: INIT_OK
+
+    success_criteria:
+      - kind: output_contains
+        value: INIT_OK
+
+  - id: fuzzer
+    fanout:
+      count: 128
+      as: shard
+    agent: codex
+    model: gpt-5-codex
+    tools: read_write
+    depends_on: [init]
+    target:
+      kind: local
+      cwd: agents/agent_{{ shard.suffix }}
+    timeout_seconds: 3600
+    retries: 2
+    retry_backoff_seconds: 2
+    extra_args:
+      - "--search"
+      - "-c"
+      - 'model_reasoning_effort="high"'
+    prompt: |
+      You are Codex fuzz shard {{ shard.number }} of {{ shard.count }} in an authorized campaign.
+
+      Shared workspace:
+      - Root: {{ pipeline.working_dir }}
+      - Shard dir: agents/agent_{{ shard.suffix }}
+      - Crash registry: crashes/README.md
+      - Shared notes: docs/global_lessons.md
+
+      Shard contract:
+      - Own only files under agents/agent_{{ shard.suffix }} unless you are appending to the shared docs or crash registry with locking.
+      - Keep your inputs and notes deterministic so another engineer can replay them.
+      - Use shard id `{{ shard.suffix }}` to vary corpus slices, seeds, flags, or target areas.
+      - Focus on deep, high-signal failure modes rather than shallow lint or unit-test noise.
+      - When you confirm a real issue, copy the minimal reproducer into `crashes/` and append a one-line entry to the registry.
+      - When a target area looks exhausted, write concise lessons to `docs/`.
+      - Continue searching until timeout.
+
+  - id: merge
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    depends_on: [fuzzer]
+    timeout_seconds: 300
+    prompt: |
+      Consolidate this 128-shard fuzzing campaign into a maintainer handoff.
+      Summarize the strongest crash families first, then recurring lessons, then quiet shards that need retargeting.
+
+      {% for shard in fanouts.fuzzer.nodes %}
+      ### {{ shard.id }} (status: {{ shard.status }})
+      {{ shard.output or "(no output)" }}
+
+      {% endfor %}

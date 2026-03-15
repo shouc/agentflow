@@ -37,6 +37,7 @@ See `examples/airflow_like.py` for a complete runnable example.
 Each node supports:
 
 - `agent`: `codex`, `claude`, or `kimi`
+- `fanout`: expand one node definition into `count` concrete nodes before validation; accepts `count` and optional `as`
 - `model`: any model string understood by the backend
 - `provider`: a string or a structured provider config with `base_url`, `api_key_env`, headers, and env
 - `tools`: `read_only` or `read_write`
@@ -54,6 +55,41 @@ Top-level pipeline controls include:
 
 - `concurrency`: max parallel nodes within a run
 - `fail_fast`: skip downstream work after the first failed node
+
+## Fan-out nodes
+
+Use `fanout` when a DAG needs many nearly identical nodes, such as repository sweeps, fuzzing swarms, or shardable audits.
+AgentFlow expands those nodes into an ordinary concrete DAG before validation and execution, so the orchestrator, runners, and persisted runs still operate on normal node ids.
+
+```yaml
+nodes:
+  - id: fuzz
+    fanout:
+      count: 8
+      as: shard
+    agent: codex
+    prompt: |
+      You are shard {{ shard.number }} of {{ shard.count }}.
+      Use suffix {{ shard.suffix }} for any per-shard paths or seeds.
+
+  - id: merge
+    agent: codex
+    depends_on: [fuzz]
+    prompt: |
+      {% for shard in fanouts.fuzz.nodes %}
+      ## {{ shard.id }}
+      {{ shard.output or "(no output)" }}
+
+      {% endfor %}
+```
+
+Expansion rules:
+
+- A fan-out node with `id: fuzz` and `count: 8` expands to `fuzz_0` through `fuzz_7`. The suffix is zero-padded when the fan-out size needs it, so `count: 128` becomes `fuzz_000` through `fuzz_127`.
+- `fanout.as` picks the template variable name for pre-validation substitution. AgentFlow currently expands dotted placeholders rooted at that alias or `fanout`, such as `{{ shard.number }}`, `{{ shard.suffix }}`, `{{ fanout.count }}`, `target.cwd: agents/agent_{{ shard.suffix }}`, or `depends_on: ["prepare_{{ shard.suffix }}"]`.
+- Ordinary runtime prompt templates such as `{{ nodes.prepare.output }}` are left intact and still render at execution time.
+- A downstream `depends_on: [fuzz]` expands to all members of the `fuzz` group.
+- During prompt rendering, `fanouts.<group>.nodes` exposes the grouped member outputs with `id`, `status`, `output`, `final_response`, `stdout`, `stderr`, and `trace`, plus convenience lists such as `fanouts.<group>.outputs`.
 
 Runtime numeric settings are validated up front: `concurrency` must be at least `1`, `timeout_seconds` must be greater than `0`, and both `retries` and `retry_backoff_seconds` must be non-negative.
 
@@ -162,7 +198,8 @@ Invokes `agentflow.remote.lambda_handler.handler`. The payload contains the prep
 
 - Uses `codex exec --json`
 - Maps tools mode to Codex sandboxing
-- Writes `CODEX_HOME/config.toml` per node for provider and MCP selection
+- Keeps model-only Codex nodes on the ambient CLI login path instead of forcing an isolated `CODEX_HOME`
+- Writes `CODEX_HOME/config.toml` only when provider or MCP selection requires an isolated home
 
 ### Claude
 
@@ -176,4 +213,3 @@ Invokes `agentflow.remote.lambda_handler.handler`. The payload contains the prep
 - Emits a Kimi-style JSON-RPC event stream
 - Calls Moonshot's OpenAI-compatible chat completions API
 - Provides a small built-in tool layer for read, search, write, and shell actions
-

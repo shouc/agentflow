@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from agentflow.specs import PipelineSpec
+from agentflow.specs import PipelineSpec, expand_compact_nodes
 
 
 def load_pipeline_from_path(path: str | Path) -> PipelineSpec:
@@ -22,6 +22,7 @@ def load_pipeline_from_text(data: str, *, base_dir: str | Path | None = None) ->
 
 def load_pipeline_from_data(data: Any, *, base_dir: str | Path | None = None) -> PipelineSpec:
     if isinstance(data, dict) and base_dir is not None:
+        data = expand_compact_nodes(data)
         data = _resolve_file_relative_paths(data, _resolve_base_dir(base_dir))
     return PipelineSpec.model_validate(data)
 

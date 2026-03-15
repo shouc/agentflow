@@ -82,6 +82,47 @@ def test_codex_adapter_suppresses_unstable_feature_warning(tmp_path):
     assert 'suppress_unstable_features_warning=true' in prepared.command
 
 
+def test_codex_adapter_does_not_force_runtime_codex_home_for_model_only_nodes(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "plan",
+            "agent": "codex",
+            "prompt": "Plan",
+            "model": "gpt-5-codex",
+        }
+    )
+
+    prepared = CodexAdapter().prepare(node, "Plan", _paths(tmp_path))
+
+    assert "CODEX_HOME" not in prepared.env
+    assert prepared.runtime_files == {}
+
+
+def test_codex_adapter_uses_runtime_codex_home_for_mcp_config(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "plan",
+            "agent": "codex",
+            "prompt": "Plan",
+            "mcps": [
+                {
+                    "name": "filesystem",
+                    "transport": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem", str(tmp_path)],
+                }
+            ],
+        }
+    )
+
+    prepared = CodexAdapter().prepare(node, "Plan", _paths(tmp_path))
+
+    assert prepared.env["CODEX_HOME"] == str(tmp_path / ".runtime" / "codex_home")
+    assert prepared.runtime_files.keys() == {"codex_home/config.toml"}
+    assert "[mcp_servers.filesystem]" in prepared.runtime_files["codex_home/config.toml"]
+    assert 'command = "npx"' in prepared.runtime_files["codex_home/config.toml"]
+
+
 def test_claude_adapter_uses_tools_flag_for_read_only_access(tmp_path):
     node = NodeSpec.model_validate(
         {

@@ -149,6 +149,52 @@ async def test_orchestrator_runs_parallel_and_templates_outputs(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_renders_fanout_group_context_in_merge_prompt(tmp_path: Path):
+    orchestrator = make_orchestrator(tmp_path)
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "fanout",
+            "working_dir": str(tmp_path),
+            "concurrency": 3,
+            "nodes": [
+                {
+                    "id": "worker",
+                    "fanout": {
+                        "count": 3,
+                        "as": "shard",
+                    },
+                    "agent": "codex",
+                    "prompt": "worker {{ shard.number }}",
+                },
+                {
+                    "id": "merge",
+                    "agent": "codex",
+                    "depends_on": ["worker"],
+                    "prompt": (
+                        "fanout={{ fanouts.worker.size }} :: "
+                        "{% for shard in fanouts.worker.nodes %}"
+                        "{{ shard.id }}={{ shard.output }};"
+                        "{% endfor %}"
+                    ),
+                },
+            ],
+        }
+    )
+
+    run = await orchestrator.submit(pipeline)
+    completed = await orchestrator.wait(run.id, timeout=5)
+
+    assert completed.status.value == "completed"
+    assert set(completed.nodes) == {"worker_0", "worker_1", "worker_2", "merge"}
+    assert completed.nodes["worker_0"].output == "worker 1"
+    assert completed.nodes["worker_1"].output == "worker 2"
+    assert completed.nodes["worker_2"].output == "worker 3"
+    assert completed.nodes["merge"].output == (
+        "fanout=3 :: worker_0=worker 1;worker_1=worker 2;worker_2=worker 3;"
+    )
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_waits_for_terminal_persist_before_returning(tmp_path: Path):
     adapters = AdapterRegistry()
     adapters.register(AgentKind.CODEX, MockAdapter())

@@ -89,7 +89,7 @@ class CodexAdapter(AgentAdapter):
 
         env = merge_env_layers(getattr(provider, "env", None), node.env)
         runtime_files: dict[str, str] = {}
-        if provider or node.mcps or node.model:
+        if provider or node.mcps:
             runtime_files[self.relative_runtime_file("codex_home", "config.toml")] = self._render_config(node, provider)
             env["CODEX_HOME"] = str(Path(paths.target_runtime_dir) / "codex_home")
         return PreparedExecution(

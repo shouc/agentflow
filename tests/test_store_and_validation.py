@@ -223,6 +223,90 @@ def test_pipeline_validation_expands_kimi_bootstrap_shorthand():
     assert pipeline.nodes[1].target.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
 
 
+def test_pipeline_validation_expands_fanout_nodes_and_group_dependencies():
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "fanout-validation",
+            "working_dir": ".",
+            "local_target_defaults": {
+                "bootstrap": "kimi",
+            },
+            "nodes": [
+                {
+                    "id": "fuzz",
+                    "fanout": {
+                        "count": 3,
+                        "as": "shard",
+                    },
+                    "agent": "codex",
+                    "prompt": "fuzz {{ shard.number }}/{{ shard.count }} in {{ shard.node_id }}",
+                },
+                {
+                    "id": "merge",
+                    "agent": "codex",
+                    "depends_on": ["fuzz"],
+                    "prompt": "merge",
+                },
+            ],
+        }
+    )
+
+    assert pipeline.fanouts == {"fuzz": ["fuzz_0", "fuzz_1", "fuzz_2"]}
+    assert [node.id for node in pipeline.nodes] == ["fuzz_0", "fuzz_1", "fuzz_2", "merge"]
+    assert pipeline.nodes[0].prompt == "fuzz 1/3 in fuzz_0"
+    assert pipeline.nodes[1].prompt == "fuzz 2/3 in fuzz_1"
+    assert pipeline.nodes[2].prompt == "fuzz 3/3 in fuzz_2"
+    assert pipeline.nodes[0].target.bootstrap == "kimi"
+    assert pipeline.nodes[1].target.bootstrap == "kimi"
+    assert pipeline.node_map["merge"].depends_on == ["fuzz_0", "fuzz_1", "fuzz_2"]
+
+
+def test_pipeline_validation_rejects_invalid_fanout_alias():
+    with pytest.raises(ValueError, match=r"fanout\.as.*valid template variable name"):
+        PipelineSpec.model_validate(
+            {
+                "name": "bad-fanout",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "fuzz",
+                        "fanout": {
+                            "count": 2,
+                            "as": "bad-alias",
+                        },
+                        "agent": "codex",
+                        "prompt": "hi",
+                    }
+                ],
+            }
+        )
+
+
+def test_pipeline_validation_rejects_fanout_group_id_collision_with_normal_node():
+    with pytest.raises(ValueError, match=r"duplicate node ids: \['fuzz'\]"):
+        PipelineSpec.model_validate(
+            {
+                "name": "fanout-id-collision",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "fuzz",
+                        "fanout": {
+                            "count": 2,
+                        },
+                        "agent": "codex",
+                        "prompt": "fanout",
+                    },
+                    {
+                        "id": "fuzz",
+                        "agent": "codex",
+                        "prompt": "plain",
+                    },
+                ],
+            }
+        )
+
+
 def test_pipeline_validation_merges_extra_shell_init_into_kimi_bootstrap_shorthand():
     pipeline = PipelineSpec.model_validate(
         {

@@ -22,6 +22,7 @@ Scaffold and run a starter pipeline:
 ```bash
 agentflow templates
 agentflow init > pipeline.yaml
+agentflow init repo-sweep.yaml --template codex-fanout-repo-sweep
 agentflow validate pipeline.yaml
 agentflow run pipeline.yaml
 ```
@@ -93,6 +94,31 @@ nodes:
       Review trace:
       {{ nodes.review.output }}
 ```
+
+For larger swarms, use node-level `fanout` to keep the YAML compact while still running a concrete DAG:
+
+```yaml
+nodes:
+  - id: fuzzer
+    fanout:
+      count: 128
+      as: shard
+    agent: codex
+    prompt: |
+      You are shard {{ shard.number }} of {{ shard.count }}.
+
+  - id: merge
+    agent: codex
+    depends_on: [fuzzer]
+    prompt: |
+      {% for shard in fanouts.fuzzer.nodes %}
+      ## {{ shard.id }}
+      {{ shard.output or "(no output)" }}
+
+      {% endfor %}
+```
+
+See `examples/codex-fanout-repo-sweep.yaml` for a bundled maintainer-friendly review template and `examples/fuzz/fuzz_codex_128.yaml` for a compact 128-shard Codex fuzzing swarm.
 
 ## Docs
 

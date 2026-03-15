@@ -1,0 +1,57 @@
+name: codex-fanout-repo-sweep
+description: Fan out a Codex repository sweep across 8 shards and merge the findings.
+working_dir: .
+concurrency: 8
+
+nodes:
+  - id: prepare
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    capture: final
+    prompt: |
+      Inspect the repository and write shared review instructions for 8 independent Codex shards.
+
+      The shards should avoid duplicate work by splitting the tree with a stable modulo strategy:
+      - review files whose stable path hash modulo 8 equals the shard index
+      - focus on bugs, risky code paths, and missing tests
+      - report only concrete findings or high-signal follow-up areas
+
+  - id: sweep
+    fanout:
+      count: 8
+      as: shard
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    capture: final
+    depends_on: [prepare]
+    retries: 1
+    retry_backoff_seconds: 1
+    prompt: |
+      You are Codex shard {{ shard.number }} of {{ shard.count }} for this repository sweep.
+
+      Shared plan:
+      {{ nodes.prepare.output }}
+
+      Your shard contract:
+      - Use shard suffix `{{ shard.suffix }}` as your stable identity.
+      - Review files whose stable path hash modulo {{ shard.count }} equals {{ shard.index }}.
+      - Stay in your lane; do not duplicate other shards.
+      - Report concrete bugs, missing tests, or dangerous assumptions first.
+      - If your slice is quiet, report the most suspicious areas worth a second pass.
+
+  - id: merge
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    depends_on: [sweep]
+    prompt: |
+      Merge the shard reports into one maintainer summary.
+      Lead with the highest-risk findings and call out repeated themes across shards.
+
+      {% for shard in fanouts.sweep.nodes %}
+      ## {{ shard.id }} (status: {{ shard.status }})
+      {{ shard.output or "(no output)" }}
+
+      {% endfor %}

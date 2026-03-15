@@ -332,6 +332,8 @@ def test_templates_command_lists_bundled_templates():
         "Bundled templates:\n"
         "- pipeline: Generic Codex/Claude/Kimi starter DAG. "
         "(source: `examples/pipeline.yaml`, use: `agentflow init --template pipeline`)\n"
+        "- codex-fanout-repo-sweep: Codex repo sweep that fans out one plan into 8 review shards and a final merge. "
+        "(source: `examples/codex-fanout-repo-sweep.yaml`, use: `agentflow init --template codex-fanout-repo-sweep`)\n"
         "- local-kimi-smoke: Local Codex plus Claude-on-Kimi smoke DAG using `bootstrap: kimi`. "
         "(source: `examples/local-real-agents-kimi-smoke.yaml`, use: `agentflow init --template local-kimi-smoke`)\n"
         "- local-kimi-shell-init-smoke: Local Codex plus Claude-on-Kimi smoke DAG using explicit `shell_init: kimi`. "
@@ -662,7 +664,7 @@ nodes:
     assert "Bootstrap: shell=bash, login=true, startup=~/.profile -> ~/.bashrc, interactive=true, init=kimi" in result.stdout
     assert "Startup files: ~/.bash_profile=missing, ~/.bash_login=missing, ~/.profile=present" in result.stdout
     assert "Launch: bash -l -i -c 'kimi && eval \"$AGENTFLOW_TARGET_COMMAND\"'" in result.stdout
-    assert "Runtime files: codex_home/config.toml" in result.stdout
+    assert "Runtime files:" not in result.stdout
     assert "Prompt: Review this: <inspect placeholder for nodes.plan.output>" in result.stdout
 
 

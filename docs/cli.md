@@ -20,18 +20,20 @@ Scaffold a pipeline from the bundled templates:
 ```bash
 agentflow templates
 agentflow init > pipeline.yaml
+agentflow init repo-sweep.yaml --template codex-fanout-repo-sweep
 agentflow init kimi-smoke.yaml --template local-kimi-smoke
 agentflow init kimi-shell-init-smoke.yaml --template local-kimi-shell-init-smoke
 agentflow init kimi-shell-wrapper-smoke.yaml --template local-kimi-shell-wrapper-smoke
 ```
 
 Use `agentflow templates` to list the bundled starters with short descriptions, example source files, and the matching `agentflow init --template ...` command.
-The default `pipeline` template is a generic Codex/Claude/Kimi DAG. The `local-kimi-smoke` template is the same real-agent local Codex plus Claude-on-Kimi smoke DAG used by the repo's verification scripts, so it is a fast way to bootstrap a known-good local setup into your own workspace. When you want that same local smoke flow with explicit `shell: bash`, `shell_login: true`, `shell_interactive: true`, and `shell_init: kimi` wiring instead of the shorthand `bootstrap: kimi`, use the `local-kimi-shell-init-smoke` template. When you want the same flow with an explicit `target.shell: "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"` wrapper, use the `local-kimi-shell-wrapper-smoke` template.
+The default `pipeline` template is a generic Codex/Claude/Kimi DAG. The `codex-fanout-repo-sweep` template shows the newer compact `fanout` authoring path by expanding one Codex review node into 8 shards plus a merge step, which makes it a better starting point for maintainers who want broader repo sweeps, large audits, or shardable review tasks. The `local-kimi-smoke` template is the same real-agent local Codex plus Claude-on-Kimi smoke DAG used by the repo's verification scripts, so it is a fast way to bootstrap a known-good local setup into your own workspace. When you want that same local smoke flow with explicit `shell: bash`, `shell_login: true`, `shell_interactive: true`, and `shell_init: kimi` wiring instead of the shorthand `bootstrap: kimi`, use the `local-kimi-shell-init-smoke` template. When you want the same flow with an explicit `target.shell: "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"` wrapper, use the `local-kimi-shell-wrapper-smoke` template.
 
 Validate a pipeline:
 
 ```bash
 agentflow validate examples/pipeline.yaml
+agentflow validate examples/codex-fanout-repo-sweep.yaml
 ```
 
 Inspect the resolved launch plan before running it:
@@ -40,6 +42,7 @@ Inspect the resolved launch plan before running it:
 agentflow inspect examples/local-real-agents-kimi-smoke.yaml
 agentflow inspect examples/local-real-agents-kimi-smoke.yaml --output json-summary
 agentflow inspect examples/pipeline.yaml --node review --output json
+agentflow inspect examples/fuzz/fuzz_codex_128.yaml --output summary
 ```
 
 The default summary view now includes resolved per-node model, tools, capture, skills, MCP server names, provider details, and auth source hints when they are set, which makes it easier to verify mixed Codex, Claude, and Kimi launch configs before you execute a run.
@@ -289,4 +292,3 @@ The FastAPI app exposes:
 - `POST /api/runs/{run_id}/cancel`
 - `POST /api/runs/{run_id}/rerun`
 - `GET /api/health`
-

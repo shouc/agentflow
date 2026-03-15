@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from collections import Counter
 from datetime import datetime, timezone
@@ -75,6 +76,9 @@ class ProviderConfig(BaseModel):
 _KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 _LOCAL_KIMI_BOOTSTRAP_SHELL_INIT = ("command -v kimi >/dev/null 2>&1", "kimi")
 _LOCAL_BOOTSTRAP_TARGET_KEYS = ("shell", "shell_login", "shell_interactive", "shell_init")
+_FANOUT_ALIAS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_FANOUT_RESERVED_CONTEXT_NAMES = {"fanout", "fanouts", "nodes", "pipeline"}
+_FANOUT_TEMPLATE_PATTERN = re.compile(r"{{\s*(?P<expr>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}")
 
 
 def _normalize_local_bootstrap(value: object) -> str | None:
@@ -419,6 +423,28 @@ SuccessCriterion = Annotated[
 ]
 
 
+class FanoutSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    count: int = Field(ge=1)
+    as_: str = Field(default="item", alias="as")
+
+    @field_validator("as_")
+    @classmethod
+    def validate_alias(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("`fanout.as` must not be empty")
+        if normalized in _FANOUT_RESERVED_CONTEXT_NAMES:
+            raise ValueError(
+                "`fanout.as` uses a reserved template variable name; choose something other than "
+                "`fanout`, `fanouts`, `nodes`, or `pipeline`"
+            )
+        if not _FANOUT_ALIAS_PATTERN.fullmatch(normalized):
+            raise ValueError("`fanout.as` must be a valid template variable name")
+        return normalized
+
+
 class NodeSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -451,6 +477,148 @@ class NodeSpec(BaseModel):
             raise ValueError(f"duplicate MCP server names on node {self.id!r}: {duplicate_mcp_names}")
         resolve_provider(self.provider, self.agent)
         return self
+
+
+def _fanout_suffix(index: int, count: int) -> str:
+    width = max(1, len(str(count)))
+    return str(index).zfill(width)
+
+
+def _fanout_iteration_context(template_id: str, fanout: FanoutSpec, index: int) -> dict[str, Any]:
+    suffix = _fanout_suffix(index, fanout.count)
+    member = {
+        "index": index,
+        "number": index + 1,
+        "count": fanout.count,
+        "suffix": suffix,
+        "value": index,
+        "template_id": template_id,
+        "node_id": f"{template_id}_{suffix}",
+    }
+    return {fanout.as_: member, "fanout": member}
+
+
+def _render_fanout_value(value: Any, context: dict[str, Any]) -> Any:
+    if isinstance(value, str):
+        return _render_fanout_string(value, context)
+    if isinstance(value, list):
+        return [_render_fanout_value(item, context) for item in value]
+    if isinstance(value, dict):
+        return {key: _render_fanout_value(item, context) for key, item in value.items()}
+    return value
+
+
+def _resolve_fanout_template_expression(context: dict[str, Any], expression: str) -> Any:
+    current: Any = context
+    for part in expression.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        raise KeyError(expression)
+    return current
+
+
+def _render_fanout_string(template_text: str, context: dict[str, Any]) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        expression = match.group("expr")
+        root = expression.split(".", 1)[0]
+        if root not in context:
+            return match.group(0)
+        try:
+            resolved = _resolve_fanout_template_expression(context, expression)
+        except KeyError:
+            return match.group(0)
+        return str(resolved)
+
+    return _FANOUT_TEMPLATE_PATTERN.sub(_replace, template_text)
+
+
+def _expand_fanout_node(node: dict[str, Any], fanout: FanoutSpec) -> tuple[list[dict[str, Any]], list[str]]:
+    template_id = node.get("id")
+    if not isinstance(template_id, str) or not template_id.strip():
+        raise ValueError("fanout nodes require a non-empty string `id`")
+    if any(marker in template_id for marker in ("{{", "{%", "{#")):
+        raise ValueError("fanout node `id` must be a literal group name, not a rendered template")
+
+    node_template = dict(node)
+    node_template.pop("fanout", None)
+    expanded_nodes: list[dict[str, Any]] = []
+    member_ids: list[str] = []
+    for index in range(fanout.count):
+        iteration_context = _fanout_iteration_context(template_id, fanout, index)
+        expanded = _render_fanout_value(node_template, iteration_context)
+        if not isinstance(expanded, dict):
+            raise ValueError(f"fanout node {template_id!r} did not expand into an object")
+        member_id = iteration_context["fanout"]["node_id"]
+        expanded["id"] = member_id
+        expanded_nodes.append(expanded)
+        member_ids.append(member_id)
+    return expanded_nodes, member_ids
+
+
+def _expand_fanout_dependencies(nodes: list[Any], fanouts: dict[str, list[str]]) -> list[Any]:
+    expanded_nodes: list[Any] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            expanded_nodes.append(node)
+            continue
+        depends_on = node.get("depends_on")
+        if not isinstance(depends_on, list):
+            expanded_nodes.append(node)
+            continue
+        updated = dict(node)
+        rewritten: list[Any] = []
+        for dependency in depends_on:
+            if isinstance(dependency, str) and dependency in fanouts:
+                rewritten.extend(fanouts[dependency])
+                continue
+            rewritten.append(dependency)
+        updated["depends_on"] = rewritten
+        expanded_nodes.append(updated)
+    return expanded_nodes
+
+
+def expand_compact_nodes(payload: dict[str, Any]) -> dict[str, Any]:
+    resolved = dict(payload)
+    nodes = resolved.get("nodes")
+    if not isinstance(nodes, list):
+        return resolved
+
+    source_ids = [node.get("id") for node in nodes if isinstance(node, dict) and isinstance(node.get("id"), str)]
+    duplicate_source_ids = {node_id for node_id, count in Counter(source_ids).items() if count > 1}
+    if duplicate_source_ids:
+        raise ValueError(f"duplicate node ids: {sorted(duplicate_source_ids)}")
+
+    fanouts: dict[str, list[str]] = {}
+    raw_fanouts = resolved.get("fanouts")
+    if isinstance(raw_fanouts, dict):
+        fanouts = {
+            str(group_id): [str(member_id) for member_id in members]
+            for group_id, members in raw_fanouts.items()
+            if isinstance(group_id, str) and isinstance(members, list)
+        }
+    saw_fanout = False
+    expanded_nodes: list[Any] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            expanded_nodes.append(node)
+            continue
+        raw_fanout = node.get("fanout")
+        if raw_fanout is None:
+            expanded_nodes.append(dict(node))
+            continue
+        saw_fanout = True
+        fanout = FanoutSpec.model_validate(raw_fanout)
+        rendered_nodes, member_ids = _expand_fanout_node(node, fanout)
+        fanouts[str(node.get("id"))] = member_ids
+        expanded_nodes.extend(rendered_nodes)
+
+    if not saw_fanout:
+        return resolved
+
+    resolved["fanouts"] = fanouts
+    resolved["nodes"] = _expand_fanout_dependencies(expanded_nodes, fanouts)
+    return resolved
 
 
 def _local_target_defaults_payload(value: Any) -> dict[str, Any] | None:
@@ -536,6 +704,7 @@ class PipelineSpec(BaseModel):
     concurrency: int = Field(default=4, ge=1)
     fail_fast: bool = False
     local_target_defaults: LocalTarget | None = None
+    fanouts: dict[str, list[str]] = Field(default_factory=dict)
     nodes: list[NodeSpec]
 
     @model_validator(mode="before")
@@ -543,7 +712,7 @@ class PipelineSpec(BaseModel):
     def apply_defaults(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        return apply_local_target_defaults(data)
+        return apply_local_target_defaults(expand_compact_nodes(data))
 
     @model_validator(mode="after")
     def validate_nodes(self) -> "PipelineSpec":
@@ -559,6 +728,14 @@ class PipelineSpec(BaseModel):
         }
         if missing:
             raise ValueError(f"unknown dependencies: {sorted(missing)}")
+        fanout_missing = {
+            member_id
+            for members in self.fanouts.values()
+            for member_id in members
+            if member_id not in ids
+        }
+        if fanout_missing:
+            raise ValueError(f"fanout metadata references unknown nodes: {sorted(fanout_missing)}")
         self._validate_acyclic_graph()
         return self
 

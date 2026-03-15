@@ -18,6 +18,11 @@ _BUNDLED_TEMPLATES = (
         description="Generic Codex/Claude/Kimi starter DAG.",
     ),
     BundledTemplate(
+        name="codex-fanout-repo-sweep",
+        example_name="codex-fanout-repo-sweep.yaml",
+        description="Codex repo sweep that fans out one plan into 8 review shards and a final merge.",
+    ),
+    BundledTemplate(
         name="local-kimi-smoke",
         example_name="local-real-agents-kimi-smoke.yaml",
         description="Local Codex plus Claude-on-Kimi smoke DAG using `bootstrap: kimi`.",

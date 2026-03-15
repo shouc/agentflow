@@ -132,3 +132,28 @@ def test_load_pipeline_from_data_resolves_relative_paths_from_explicit_base_dir(
 
     assert pipeline.working_dir == str(workspace.resolve())
     assert pipeline.nodes[0].target.cwd == str((workspace / "task").resolve())
+
+
+def test_load_pipeline_from_text_expands_fanout_nodes_before_resolving_relative_cwds(tmp_path):
+    workspace = tmp_path / "workspace"
+    pipeline = load_pipeline_from_text(
+        """name: fanout-loader
+working_dir: .
+nodes:
+  - id: fuzz
+    fanout:
+      count: 2
+      as: shard
+    agent: codex
+    prompt: shard {{ shard.number }}
+    target:
+      kind: local
+      cwd: agents/agent_{{ shard.suffix }}
+""",
+        base_dir=workspace,
+    )
+
+    assert pipeline.fanouts == {"fuzz": ["fuzz_0", "fuzz_1"]}
+    assert [node.id for node in pipeline.nodes] == ["fuzz_0", "fuzz_1"]
+    assert pipeline.nodes[0].target.cwd == str((workspace / "agents" / "agent_0").resolve())
+    assert pipeline.nodes[1].target.cwd == str((workspace / "agents" / "agent_1").resolve())

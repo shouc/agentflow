@@ -16,6 +16,8 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     by_name = {template.name: template for template in templates}
     assert by_name["pipeline"].example_name == "pipeline.yaml"
     assert by_name["pipeline"].description == "Generic Codex/Claude/Kimi starter DAG."
+    assert by_name["codex-fanout-repo-sweep"].example_name == "codex-fanout-repo-sweep.yaml"
+    assert "8 review shards" in by_name["codex-fanout-repo-sweep"].description
     assert by_name["local-kimi-smoke"].example_name == "local-real-agents-kimi-smoke.yaml"
     assert "bootstrap: kimi" in by_name["local-kimi-smoke"].description
     assert by_name["local-kimi-shell-init-smoke"].example_name == "local-real-agents-kimi-shell-init-smoke.yaml"
@@ -72,6 +74,33 @@ def test_bundled_shell_wrapper_smoke_template_is_available():
     assert load_bundled_template_yaml("local-kimi-shell-wrapper-smoke").startswith(
         "name: local-real-agents-kimi-shell-wrapper-smoke\n"
     )
+
+
+def test_bundled_codex_fanout_repo_sweep_template_is_available():
+    assert "codex-fanout-repo-sweep" in bundled_template_names()
+    assert load_bundled_template_yaml("codex-fanout-repo-sweep").startswith(
+        "name: codex-fanout-repo-sweep\n"
+    )
+
+
+def test_bundled_codex_fanout_repo_sweep_pipeline_expands_into_concrete_nodes():
+    pipeline = load_pipeline_from_path(str(bundled_template_path("codex-fanout-repo-sweep")))
+
+    assert pipeline.concurrency == 8
+    assert pipeline.fanouts == {
+        "sweep": ["sweep_0", "sweep_1", "sweep_2", "sweep_3", "sweep_4", "sweep_5", "sweep_6", "sweep_7"]
+    }
+    assert [node.id for node in pipeline.nodes[:3]] == ["prepare", "sweep_0", "sweep_1"]
+    assert pipeline.node_map["merge"].depends_on == [
+        "sweep_0",
+        "sweep_1",
+        "sweep_2",
+        "sweep_3",
+        "sweep_4",
+        "sweep_5",
+        "sweep_6",
+        "sweep_7",
+    ]
 
 
 def test_bundled_shell_wrapper_smoke_pipeline_runs_both_agents_in_explicit_shell_wrapper_mode():
