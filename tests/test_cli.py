@@ -804,7 +804,7 @@ def test_init_command_writes_grouped_catalog_template_and_support_files_to_desti
     assert "\nname: custom-catalog-grouped-48\n" in f"\n{rendered_yaml}"
     assert "concurrency: 12" in rendered_yaml
     assert "group_by:" in rendered_yaml
-    assert "{{ current.member_ids | join(\", \") }}" in rendered_yaml
+    assert "{{ current.scope.ids | join(\", \") }}" in rendered_yaml
     support_file = destination.parent / "manifests" / "codex-fuzz-catalog-grouped.csv"
     assert support_file.exists()
     support_lines = support_file.read_text(encoding="utf-8").strip().splitlines()

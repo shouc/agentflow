@@ -493,6 +493,55 @@ async def test_orchestrator_renders_grouped_fanout_members_in_merge_prompt(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_renders_current_scope_for_batched_reducers(tmp_path: Path):
+    orchestrator = make_orchestrator(tmp_path)
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "fanout-batches-scope",
+            "working_dir": str(tmp_path),
+            "concurrency": 3,
+            "nodes": [
+                {
+                    "id": "worker",
+                    "fanout": {
+                        "count": 3,
+                        "as": "shard",
+                    },
+                    "agent": "codex",
+                    "prompt": "worker {{ shard.number }}",
+                },
+                {
+                    "id": "batch_merge",
+                    "fanout": {
+                        "as": "batch",
+                        "batches": {
+                            "from": "worker",
+                            "size": 2,
+                        },
+                    },
+                    "agent": "codex",
+                    "depends_on": ["worker"],
+                    "prompt": (
+                        "done={{ current.scope.summary.completed }}/{{ current.scope.size }} :: "
+                        "{% for shard in current.scope.with_output.nodes %}"
+                        "{{ shard.node_id }}={{ shard.output }};"
+                        "{% endfor %}"
+                    ),
+                },
+            ],
+        }
+    )
+
+    run = await orchestrator.submit(pipeline)
+    completed = await orchestrator.wait(run.id, timeout=5)
+
+    assert completed.status.value == "completed"
+    assert set(completed.nodes) == {"worker_0", "worker_1", "worker_2", "batch_merge_0", "batch_merge_1"}
+    assert completed.nodes["batch_merge_0"].output == "done=2/2 :: worker_0=worker 1;worker_1=worker 2;"
+    assert completed.nodes["batch_merge_1"].output == "done=1/1 :: worker_2=worker 3;"
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_waits_for_terminal_persist_before_returning(tmp_path: Path):
     adapters = AdapterRegistry()
     adapters.register(AgentKind.CODEX, MockAdapter())

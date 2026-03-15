@@ -213,6 +213,8 @@ def test_bundled_codex_repo_sweep_batched_template_accepts_overrides_and_scopes_
     assert "node_defaults:" in rendered
     assert "agent_defaults:" in rendered
     assert "timeout_seconds: 900" in rendered
+    assert "current.scope.ids" in rendered
+    assert "current.scope.with_output.nodes" in rendered
 
     pipeline_path = tmp_path / "custom-repo-sweep.yaml"
     pipeline_path.write_text(rendered, encoding="utf-8")
@@ -336,8 +338,8 @@ def test_bundled_codex_fuzz_hierarchical_grouped_template_accepts_overrides_and_
     assert "matrix_path: manifests/codex-fuzz-hierarchical-grouped.axes.yaml" in rendered.yaml
     assert "group_by:" in rendered.yaml
     assert "from: fuzzer" in rendered.yaml
-    assert "{{ current.member_ids | join(\", \") }}" in rendered.yaml
-    assert "{{ nodes[shard.node_id].output or \"(no output)\" }}" in rendered.yaml
+    assert "{{ current.scope.ids | join(\", \") }}" in rendered.yaml
+    assert "{{ shard.output }}" in rendered.yaml
     assert rendered.support_files[0].relative_path == "manifests/codex-fuzz-hierarchical-grouped.axes.yaml"
     rendered_axes = rendered.support_files[0].content.strip().splitlines()
     assert rendered_axes[:4] == ["family:", "  - target: libpng", "    corpus: png", "  - target: libjpeg"]
@@ -635,8 +637,8 @@ def test_bundled_codex_fuzz_catalog_grouped_template_accepts_overrides_and_rende
     assert "concurrency: 12\n" in rendered.yaml
     assert "values_path: manifests/codex-fuzz-catalog-grouped.csv" in rendered.yaml
     assert "group_by:" in rendered.yaml
-    assert "{{ current.member_ids | join(\", \") }}" in rendered.yaml
-    assert "{{ nodes[shard.node_id].output or \"(no output)\" }}" in rendered.yaml
+    assert "{{ current.scope.ids | join(\", \") }}" in rendered.yaml
+    assert "{{ shard.output }}" in rendered.yaml
     assert rendered.support_files[0].relative_path == "manifests/codex-fuzz-catalog-grouped.csv"
     rendered_rows = rendered.support_files[0].content.strip().splitlines()
     assert len(rendered_rows) == 49
@@ -729,8 +731,9 @@ def test_bundled_codex_fuzz_batched_template_accepts_overrides_and_scopes_batch_
     assert "concurrency: 20\n" in rendered
     assert "count: 48" in rendered
     assert "size: 12" in rendered
-    assert "{{ current.member_ids | join(\", \") }}" in rendered
-    assert "{{ nodes[shard.node_id].output or \"(no output)\" }}" in rendered
+    assert "{{ current.scope.ids | join(\", \") }}" in rendered
+    assert "current.scope.with_output.nodes" in rendered
+    assert "{{ shard.output }}" in rendered
     assert "Batch reducers needing attention:" in rendered
     assert "{% for batch in fanouts.batch_merge.without_output.nodes %}" in rendered
 
@@ -1005,8 +1008,8 @@ def test_bundled_codex_fuzz_hierarchical_grouped_pipeline_expands_into_grouped_r
         "fuzzer_15",
     ]
     assert pipeline.node_map["family_merge_3"].fanout_member["target"] == "sqlite"
-    assert "current.member_ids" in pipeline.node_map["family_merge_0"].prompt
-    assert "current.members" in pipeline.node_map["family_merge_0"].prompt
+    assert "current.scope.ids" in pipeline.node_map["family_merge_0"].prompt
+    assert "current.scope.with_output.nodes" in pipeline.node_map["family_merge_0"].prompt
     assert "current.target" in pipeline.node_map["family_merge_0"].prompt
     assert "current.corpus" in pipeline.node_map["family_merge_0"].prompt
     assert '{% set target = "' not in pipeline.node_map["family_merge_0"].prompt
@@ -1137,8 +1140,8 @@ def test_bundled_codex_fuzz_catalog_grouped_pipeline_expands_into_scoped_grouped
         "fuzzer_114",
         "fuzzer_115",
     ]
-    assert "current.member_ids" in pipeline.node_map["family_merge_0"].prompt
-    assert "current.members" in pipeline.node_map["family_merge_0"].prompt
+    assert "current.scope.ids" in pipeline.node_map["family_merge_0"].prompt
+    assert "current.scope.with_output.nodes" in pipeline.node_map["family_merge_0"].prompt
     assert pipeline.node_map["family_merge_0"].depends_on[0] == "fuzzer_000"
     assert pipeline.node_map["family_merge_0"].depends_on[-1] == "fuzzer_115"
     assert pipeline.node_map["merge"].depends_on == [

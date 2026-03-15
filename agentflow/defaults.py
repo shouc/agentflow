@@ -281,17 +281,28 @@ nodes:
       - Completed shards: {{ fanouts.fuzzer.summary.completed }}
       - Failed shards: {{ fanouts.fuzzer.summary.failed }}
       - Silent shards: {{ fanouts.fuzzer.summary.without_output }}
-      - Reducer shard count: {{ current.size }}
-      - Scoped shard ids: {{ current.member_ids | join(", ") }}
+      - Reducer shard count: {{ current.scope.size }}
+      - Scoped completed shards: {{ current.scope.summary.completed }}
+      - Scoped failed shards: {{ current.scope.summary.failed }}
+      - Scoped silent shards: {{ current.scope.summary.without_output }}
+      - Scoped shard ids: {{ current.scope.ids | join(", ") }}
 
       Focus only on {{ current.target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting. The dependency fan-in is already scoped to the shard ids above.
 
-      {% for shard in current.members %}
-      ### {{ shard.label }} :: {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {% for shard in current.scope.with_output.nodes %}
+      ### {{ shard.label }} :: {{ shard.node_id }} (status: {{ shard.status }})
+      {{ shard.output }}
 
       {% endfor %}
+      {% if current.scope.failed.size %}
+      Failed scoped shards:
+      {% for shard in current.scope.failed.nodes %}
+      - {{ shard.id }} :: {{ shard.label }}
+      {% endfor %}
+      {% endif %}
+      {% if not current.scope.with_output.size %}
       If every shard above is silent or failed, say that explicitly and use the scoped shard list to suggest retargeting.
+      {% endif %}
 
   - id: merge
     agent: codex
@@ -810,17 +821,29 @@ nodes:
       Batch coverage:
       - Source group: {{ current.source_group }}
       - Total source shards: {{ current.source_count }}
-      - Batch size: {{ current.size }}
+      - Batch size: {{ current.scope.size }}
       - Shard range: {{ current.start_number }} through {{ current.end_number }}
-      - Shard ids: {{ current.member_ids | join(", ") }}
+      - Shard ids: {{ current.scope.ids | join(", ") }}
+      - Completed shards: {{ current.scope.summary.completed }}
+      - Failed shards: {{ current.scope.summary.failed }}
+      - Silent shards: {{ current.scope.summary.without_output }}
 
       Rank the batch findings by severity, then confidence, then breadth of impact. If the batch is quiet, say so explicitly and point to the slices that should be rerun or retargeted.
 
-      {% for shard in current.members %}
-      ## {{ shard.label }} :: {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {% for shard in current.scope.with_output.nodes %}
+      ## {{ shard.label }} :: {{ shard.node_id }} (status: {{ shard.status }})
+      {{ shard.output }}
 
       {% endfor %}
+      {% if current.scope.failed.size %}
+      Failed slices:
+      {% for shard in current.scope.failed.nodes %}
+      - {{ shard.id }} :: {{ shard.label }}
+      {% endfor %}
+      {% endif %}
+      {% if not current.scope.with_output.size %}
+      No slice in this batch produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
+      {% endif %}
 
   - id: merge
     depends_on: [batch_merge]
@@ -1114,18 +1137,30 @@ nodes:
       Batch coverage:
       - Source group: {{ current.source_group }}
       - Total source shards: {{ current.source_count }}
-      - Batch size: {{ current.size }}
+      - Batch size: {{ current.scope.size }}
       - Shard range: {{ current.start_number }} through {{ current.end_number }}
-      - Shard ids: {{ current.member_ids | join(", ") }}
+      - Shard ids: {{ current.scope.ids | join(", ") }}
+      - Completed shards: {{ current.scope.summary.completed }}
+      - Failed shards: {{ current.scope.summary.failed }}
+      - Silent shards: {{ current.scope.summary.without_output }}
 
       Focus on confirmed crashers first, then recurring lessons, then quiet shards that need retargeting.
 
-      {% for shard in current.members %}
-      ### {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
+      {% for shard in current.scope.with_output.nodes %}
+      ### {{ shard.node_id }} (status: {{ shard.status }})
       Workspace: {{ shard.workspace }}
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {{ shard.output }}
 
       {% endfor %}
+      {% if current.scope.failed.size %}
+      Failed shards:
+      {% for shard in current.scope.failed.nodes %}
+      - {{ shard.id }} :: {{ shard.workspace }}
+      {% endfor %}
+      {% endif %}
+      {% if not current.scope.with_output.size %}
+      No shard in this batch produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
+      {% endif %}
 
   - id: merge
     agent: codex
@@ -1468,17 +1503,28 @@ nodes:
       - Completed shards: {{ fanouts.fuzzer.summary.completed }}
       - Failed shards: {{ fanouts.fuzzer.summary.failed }}
       - Silent shards: {{ fanouts.fuzzer.summary.without_output }}
-      - Reducer shard count: {{ current.size }}
-      - Scoped shard ids: {{ current.member_ids | join(", ") }}
+      - Reducer shard count: {{ current.scope.size }}
+      - Scoped completed shards: {{ current.scope.summary.completed }}
+      - Scoped failed shards: {{ current.scope.summary.failed }}
+      - Scoped silent shards: {{ current.scope.summary.without_output }}
+      - Scoped shard ids: {{ current.scope.ids | join(", ") }}
 
       Focus only on {{ current.target }}. Summarize strong or confirmed findings first, then recurring lessons, then quiet or failed shards that need retargeting. The dependency fan-in is already scoped to the shard ids above.
 
-      {% for shard in current.members %}
-      ### {{ shard.label }} :: {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {% for shard in current.scope.with_output.nodes %}
+      ### {{ shard.label }} :: {{ shard.node_id }} (status: {{ shard.status }})
+      {{ shard.output }}
 
       {% endfor %}
+      {% if current.scope.failed.size %}
+      Failed scoped shards:
+      {% for shard in current.scope.failed.nodes %}
+      - {{ shard.id }} :: {{ shard.label }}
+      {% endfor %}
+      {% endif %}
+      {% if not current.scope.with_output.size %}
       If every shard above is silent or failed, say that explicitly and use the scoped shard list to suggest retargeting.
+      {% endif %}
 
   - id: merge
     agent: codex

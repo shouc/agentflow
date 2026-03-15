@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from agentflow import DAG, claude, codex, fanout_batches, fanout_count, fanout_matrix, kimi
+from agentflow import DAG, claude, codex, fanout_batches, fanout_count, fanout_group_by, fanout_matrix, kimi
 from agentflow.loader import load_pipeline_from_text
 
 
@@ -171,6 +171,67 @@ def test_airflow_like_dag_supports_matrix_and_batch_fanout_helpers():
     assert nodes["merge"].depends_on == ["batch_merge_0", "batch_merge_1"]
 
 
+def test_airflow_like_dag_supports_grouped_fanout_helpers():
+    with DAG(
+        "grouped-fuzz",
+        working_dir="/tmp/grouped-fuzz",
+        concurrency=8,
+        node_defaults={
+            "agent": "codex",
+            "tools": "read_only",
+        },
+        agent_defaults={
+            "codex": {
+                "model": "gpt-5-codex",
+                "extra_args": ["--search"],
+            }
+        },
+    ) as dag:
+        init = codex(task_id="init", prompt="init", tools="read_write")
+        fuzzer = codex(
+            task_id="fuzzer",
+            prompt="fuzz {{ shard.target }} {{ shard.sanitizer }} inside {{ shard.workspace }}",
+            fanout=fanout_matrix(
+                {
+                    "family": [
+                        {"target": "libpng", "corpus": "png"},
+                        {"target": "sqlite", "corpus": "sql"},
+                    ],
+                    "variant": [
+                        {"sanitizer": "asan"},
+                        {"sanitizer": "ubsan"},
+                    ],
+                },
+                as_="shard",
+                derive={"workspace": "agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.suffix }}"},
+            ),
+            target={"cwd": "{{ shard.workspace }}"},
+        )
+        family_merge = codex(
+            task_id="family_merge",
+            prompt="group {{ current.target }} has {{ current.scope.size }} shards",
+            fanout=fanout_group_by("fuzzer", ["target", "corpus"], as_="family"),
+        )
+        merge = codex(task_id="merge", prompt="merge")
+        init >> fuzzer
+        fuzzer >> family_merge
+        family_merge >> merge
+
+    spec = dag.to_spec()
+    nodes = spec.node_map
+
+    assert spec.fanouts == {
+        "fuzzer": ["fuzzer_0", "fuzzer_1", "fuzzer_2", "fuzzer_3"],
+        "family_merge": ["family_merge_0", "family_merge_1"],
+    }
+    assert nodes["family_merge_0"].depends_on == ["fuzzer_0", "fuzzer_1"]
+    assert nodes["family_merge_0"].fanout_member["member_ids"] == ["fuzzer_0", "fuzzer_1"]
+    assert nodes["family_merge_0"].fanout_member["target"] == "libpng"
+    assert nodes["family_merge_1"].depends_on == ["fuzzer_2", "fuzzer_3"]
+    assert nodes["family_merge_1"].fanout_member["target"] == "sqlite"
+    assert nodes["merge"].depends_on == ["family_merge_0", "family_merge_1"]
+
+
 def test_airflow_like_fuzz_batched_example_emits_valid_pipeline():
     repo_root = Path(__file__).resolve().parents[1]
     completed = subprocess.run(
@@ -191,3 +252,26 @@ def test_airflow_like_fuzz_batched_example_emits_valid_pipeline():
     assert spec.node_map["fuzzer_000"].target.cwd.endswith("/codex_fuzz_python_128/agents/agent_000")
     assert spec.node_map["batch_merge_0"].depends_on == spec.fanouts["fuzzer"][:16]
     assert spec.node_map["merge"].depends_on == spec.fanouts["batch_merge"]
+
+
+def test_airflow_like_fuzz_grouped_example_emits_valid_pipeline():
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, str(repo_root / "examples" / "airflow_like_fuzz_grouped.py")],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+
+    spec = load_pipeline_from_text(completed.stdout, base_dir=repo_root)
+
+    assert spec.name == "airflow-like-fuzz-grouped-128"
+    assert spec.fail_fast is True
+    assert spec.concurrency == 32
+    assert len(spec.fanouts["fuzzer"]) == 128
+    assert len(spec.fanouts["family_merge"]) == 4
+    assert spec.node_map["fuzzer_000"].target.cwd.endswith("/codex_fuzz_python_grouped_128/agents/libpng_asan_seed_a_000")
+    assert spec.node_map["family_merge_0"].depends_on == spec.fanouts["fuzzer"][:32]
+    assert spec.node_map["family_merge_0"].fanout_member["member_ids"] == spec.fanouts["fuzzer"][:32]
+    assert spec.node_map["merge"].depends_on == spec.fanouts["family_merge"]

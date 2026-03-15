@@ -76,9 +76,11 @@ def _batched_pipeline(tmp_path: Path):
                     "prompt": (
                         "batch={{ current.number }}/{{ current.count }} "
                         "range={{ current.start_number }}-{{ current.end_number }} "
-                        "ids={{ current.member_ids | join(',') }} :: "
-                        "{% for shard in current.members %}"
-                        "{{ shard.node_id }}@{{ shard.workspace }}={{ nodes[shard.node_id].output or '(no output)' }};"
+                        "done={{ current.scope.summary.completed }} "
+                        "failed={{ current.scope.summary.failed }} "
+                        "ids={{ current.scope.ids | join(',') }} :: "
+                        "{% for shard in current.scope.with_output.nodes %}"
+                        "{{ shard.node_id }}@{{ shard.workspace }}={{ shard.output }};"
                         "{% endfor %}"
                     ),
                 },
@@ -119,9 +121,11 @@ def _grouped_pipeline(tmp_path: Path):
                     "agent": "codex",
                     "depends_on": ["worker"],
                     "prompt": (
-                        "family={{ current.target }} ids={{ current.member_ids | join(',') }} :: "
-                        "{% for shard in current.members %}"
-                        "{{ shard.node_id }}@{{ shard.seed }}={{ nodes[shard.node_id].output or '(no output)' }};"
+                        "family={{ current.target }} ids={{ current.scope.ids | join(',') }} "
+                        "done={{ current.scope.summary.completed }} "
+                        "failed={{ current.scope.summary.failed }} :: "
+                        "{% for shard in current.scope.with_output.nodes %}"
+                        "{{ shard.node_id }}@{{ shard.seed }}={{ shard.output }};"
                         "{% endfor %}"
                     ),
                 },
@@ -189,84 +193,21 @@ def test_build_render_context_exposes_current_node_metadata_for_runtime_reducers
 
     context = build_render_context(pipeline, results, current_node=pipeline.node_map["batch_merge_0"])
 
-    assert context["current"] == {
-        "id": "batch_merge_0",
-        "agent": "codex",
-        "depends_on": ["worker_0", "worker_1"],
-        "fanout_group": "batch_merge",
-        "index": 0,
-        "number": 1,
-        "count": 2,
-        "suffix": "0",
-        "value": {
-            "source_group": "worker",
-            "source_count": 3,
-            "size": 2,
-            "member_ids": ["worker_0", "worker_1"],
-            "members": [
-                {
-                    "index": 0,
-                    "number": 1,
-                    "count": 3,
-                    "suffix": "0",
-                    "value": 0,
-                    "template_id": "worker",
-                    "node_id": "worker_0",
-                    "workspace": "agents/agent_0",
-                },
-                {
-                    "index": 1,
-                    "number": 2,
-                    "count": 3,
-                    "suffix": "1",
-                    "value": 1,
-                    "template_id": "worker",
-                    "node_id": "worker_1",
-                    "workspace": "agents/agent_1",
-                },
-            ],
-            "start_index": 0,
-            "end_index": 1,
-            "start_number": 1,
-            "end_number": 2,
-            "start_suffix": "0",
-            "end_suffix": "1",
-        },
-        "template_id": "batch_merge",
-        "node_id": "batch_merge_0",
-        "source_group": "worker",
-        "source_count": 3,
-        "size": 2,
-        "member_ids": ["worker_0", "worker_1"],
-        "members": [
-            {
-                "index": 0,
-                "number": 1,
-                "count": 3,
-                "suffix": "0",
-                "value": 0,
-                "template_id": "worker",
-                "node_id": "worker_0",
-                "workspace": "agents/agent_0",
-            },
-            {
-                "index": 1,
-                "number": 2,
-                "count": 3,
-                "suffix": "1",
-                "value": 1,
-                "template_id": "worker",
-                "node_id": "worker_1",
-                "workspace": "agents/agent_1",
-            },
-        ],
-        "start_index": 0,
-        "end_index": 1,
-        "start_number": 1,
-        "end_number": 2,
-        "start_suffix": "0",
-        "end_suffix": "1",
-    }
+    current = context["current"]
+    assert current["id"] == "batch_merge_0"
+    assert current["agent"] == "codex"
+    assert current["depends_on"] == ["worker_0", "worker_1"]
+    assert current["fanout_group"] == "batch_merge"
+    assert current["member_ids"] == ["worker_0", "worker_1"]
+    assert current["start_number"] == 1
+    assert current["end_number"] == 2
+    assert current["scope"]["ids"] == ["worker_0", "worker_1"]
+    assert current["scope"]["summary"]["completed"] == 1
+    assert current["scope"]["summary"]["failed"] == 1
+    assert current["scope"]["summary"]["with_output"] == 2
+    assert [node["node_id"] for node in current["scope"]["with_output"]["nodes"]] == ["worker_0", "worker_1"]
+    assert current["scope"]["failed"]["nodes"][0]["workspace"] == "agents/agent_1"
+    assert current["scope"]["with_output"]["nodes"][0]["output"] == "alpha"
 
 
 def test_render_node_prompt_can_use_current_node_and_batch_members(tmp_path: Path):
@@ -282,7 +223,7 @@ def test_render_node_prompt_can_use_current_node_and_batch_members(tmp_path: Pat
     rendered = render_node_prompt(pipeline, pipeline.node_map["batch_merge_0"], results)
 
     assert rendered == (
-        "batch=1/2 range=1-2 ids=worker_0,worker_1 :: "
+        "batch=1/2 range=1-2 done=1 failed=1 ids=worker_0,worker_1 :: "
         "worker_0@agents/agent_0=alpha;"
         "worker_1@agents/agent_1=beta;"
     )
@@ -300,82 +241,20 @@ def test_build_render_context_exposes_current_node_metadata_for_grouped_reducers
 
     context = build_render_context(pipeline, results, current_node=pipeline.node_map["family_merge_0"])
 
-    assert context["current"] == {
-        "id": "family_merge_0",
-        "agent": "codex",
-        "depends_on": ["worker_0", "worker_1"],
-        "fanout_group": "family_merge",
-        "index": 0,
-        "number": 1,
-        "count": 2,
-        "suffix": "0",
-        "value": {
-            "source_group": "worker",
-            "source_count": 3,
-            "size": 2,
-            "member_ids": ["worker_0", "worker_1"],
-            "members": [
-                {
-                    "index": 0,
-                    "number": 1,
-                    "count": 3,
-                    "suffix": "0",
-                    "value": {"target": "libpng", "seed": 1001, "workspace": "agents/libpng_0"},
-                    "template_id": "worker",
-                    "node_id": "worker_0",
-                    "target": "libpng",
-                    "seed": 1001,
-                    "workspace": "agents/libpng_0",
-                },
-                {
-                    "index": 1,
-                    "number": 2,
-                    "count": 3,
-                    "suffix": "1",
-                    "value": {"target": "libpng", "seed": 1002, "workspace": "agents/libpng_1"},
-                    "template_id": "worker",
-                    "node_id": "worker_1",
-                    "target": "libpng",
-                    "seed": 1002,
-                    "workspace": "agents/libpng_1",
-                },
-            ],
-            "target": "libpng",
-        },
-        "template_id": "family_merge",
-        "node_id": "family_merge_0",
-        "source_group": "worker",
-        "source_count": 3,
-        "size": 2,
-        "member_ids": ["worker_0", "worker_1"],
-        "members": [
-            {
-                "index": 0,
-                "number": 1,
-                "count": 3,
-                "suffix": "0",
-                "value": {"target": "libpng", "seed": 1001, "workspace": "agents/libpng_0"},
-                "template_id": "worker",
-                "node_id": "worker_0",
-                "target": "libpng",
-                "seed": 1001,
-                "workspace": "agents/libpng_0",
-            },
-            {
-                "index": 1,
-                "number": 2,
-                "count": 3,
-                "suffix": "1",
-                "value": {"target": "libpng", "seed": 1002, "workspace": "agents/libpng_1"},
-                "template_id": "worker",
-                "node_id": "worker_1",
-                "target": "libpng",
-                "seed": 1002,
-                "workspace": "agents/libpng_1",
-            },
-        ],
-        "target": "libpng",
-    }
+    current = context["current"]
+    assert current["id"] == "family_merge_0"
+    assert current["agent"] == "codex"
+    assert current["depends_on"] == ["worker_0", "worker_1"]
+    assert current["fanout_group"] == "family_merge"
+    assert current["target"] == "libpng"
+    assert current["member_ids"] == ["worker_0", "worker_1"]
+    assert current["scope"]["ids"] == ["worker_0", "worker_1"]
+    assert current["scope"]["summary"]["completed"] == 1
+    assert current["scope"]["summary"]["failed"] == 1
+    assert current["scope"]["summary"]["with_output"] == 2
+    assert [node["seed"] for node in current["scope"]["with_output"]["nodes"]] == [1001, 1002]
+    assert current["scope"]["failed"]["nodes"][0]["node_id"] == "worker_1"
+    assert current["scope"]["with_output"]["nodes"][1]["output"] == "beta"
 
 
 def test_render_node_prompt_can_use_current_node_and_group_members(tmp_path: Path):
@@ -391,7 +270,7 @@ def test_render_node_prompt_can_use_current_node_and_group_members(tmp_path: Pat
     rendered = render_node_prompt(pipeline, pipeline.node_map["family_merge_0"], results)
 
     assert rendered == (
-        "family=libpng ids=worker_0,worker_1 :: "
+        "family=libpng ids=worker_0,worker_1 done=1 failed=1 :: "
         "worker_0@1001=alpha;"
         "worker_1@1002=beta;"
     )

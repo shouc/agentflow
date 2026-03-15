@@ -77,17 +77,29 @@ nodes:
       Batch coverage:
       - Source group: {{ current.source_group }}
       - Total source shards: {{ current.source_count }}
-      - Batch size: {{ current.size }}
+      - Batch size: {{ current.scope.size }}
       - Shard range: {{ current.start_number }} through {{ current.end_number }}
-      - Shard ids: {{ current.member_ids | join(", ") }}
+      - Shard ids: {{ current.scope.ids | join(", ") }}
+      - Completed shards: {{ current.scope.summary.completed }}
+      - Failed shards: {{ current.scope.summary.failed }}
+      - Silent shards: {{ current.scope.summary.without_output }}
 
       Rank the batch findings by severity, then confidence, then breadth of impact. If the batch is quiet, say so explicitly and point to the slices that should be rerun or retargeted.
 
-      {% for shard in current.members %}
-      ## {{ shard.label }} :: {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {% for shard in current.scope.with_output.nodes %}
+      ## {{ shard.label }} :: {{ shard.node_id }} (status: {{ shard.status }})
+      {{ shard.output }}
 
       {% endfor %}
+      {% if current.scope.failed.size %}
+      Failed slices:
+      {% for shard in current.scope.failed.nodes %}
+      - {{ shard.id }} :: {{ shard.label }}
+      {% endfor %}
+      {% endif %}
+      {% if not current.scope.with_output.size %}
+      No slice in this batch produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.
+      {% endif %}
 
   - id: merge
     depends_on: [batch_merge]

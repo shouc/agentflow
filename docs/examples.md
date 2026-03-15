@@ -14,13 +14,13 @@ Use this page to choose a starter without reading every bundled YAML file.
 | Starter | Use it when | Key features |
 | --- | --- | --- |
 | `codex-fuzz-swarm` | The campaign is homogeneous and you only need a single final reducer. | `fanout.count`, shared init, resize with `--set shards=...`. |
-| `codex-fuzz-batched` | The campaign is homogeneous, but a single reducer would be too noisy. | `fanout.batches`, scoped intermediate reducers. |
+| `codex-fuzz-batched` | The campaign is homogeneous, but a single reducer would be too noisy. | `fanout.batches`, `current.scope`, scoped intermediate reducers. |
 | `codex-fuzz-matrix` | The shard roster is a clean cartesian product. | `fanout.matrix`. |
 | `codex-fuzz-matrix-derived` | The matrix also needs reusable labels or workdirs. | `fanout.derive`. |
 | `codex-fuzz-matrix-curated` | The matrix is mostly regular, but you need a few exclusions or bespoke shards. | `fanout.exclude`, `fanout.include`, `fanout.derive`. |
 | `codex-fuzz-matrix-manifest` | The matrix axes should live outside the main pipeline file. | `fanout.matrix_path`, rendered support manifest. |
 | `codex-fuzz-catalog` | Every shard needs explicit per-row metadata that is awkward to derive. | `fanout.values_path`, rendered CSV catalog. |
-| `codex-fuzz-hierarchical-grouped` | Reducer families should be derived automatically from shard metadata. | `fanout.group_by`, scoped reducers from the shard fanout. |
+| `codex-fuzz-hierarchical-grouped` | Reducer families should be derived automatically from shard metadata. | `fanout.group_by`, `current.scope`, scoped reducers from the shard fanout. |
 | `codex-fuzz-hierarchical-manifest` | Reducer families should stay in a maintainer-owned sidecar roster. | `fanout.matrix_path` plus `values_path`. |
 
 The fixed `*-128` examples are reference snapshots when you want to inspect a full large DAG directly from the repo instead of rendering one with `agentflow init`.
@@ -31,6 +31,7 @@ The fixed `*-128` examples are reference snapshots when you want to inspect a fu
 | --- | --- | --- |
 | `airflow_like.py` | You want the smallest Python-authored DAG reference. | Static dependencies with `plan >> [implement, review]`. |
 | `airflow_like_fuzz_batched.py` | You want a 128-shard Codex swarm authored from Python instead of YAML templates. | `DAG(node_defaults=..., agent_defaults=..., fail_fast=...)`, `fanout_count(...)`, `fanout_batches(...)`. |
+| `airflow_like_fuzz_grouped.py` | You want a 128-shard grouped Codex campaign from Python with reducer-local summaries. | `fanout_matrix(...)`, `fanout_group_by(...)`, `current.scope`. |
 
 ## Local smoke flows
 

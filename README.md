@@ -70,7 +70,7 @@ Choose a starter:
 - `codex-fuzz-batched` for 128-shard homogeneous swarms that need automatic intermediate reducers
 - `codex-fuzz-swarm` for homogeneous shard swarms you resize with `--set shards=...`
 
-Prefer Python authoring for large swarms? `examples/airflow_like_fuzz_batched.py` shows a runnable 128-shard Codex campaign that uses `DAG(node_defaults=..., agent_defaults=..., fail_fast=True)` with `fanout_count(...)` and `fanout_batches(...)` instead of hand-writing raw fanout dictionaries.
+Prefer Python authoring for large swarms? `examples/airflow_like_fuzz_batched.py` shows a runnable 128-shard Codex campaign that uses `DAG(node_defaults=..., agent_defaults=..., fail_fast=True)` with `fanout_count(...)` and `fanout_batches(...)` instead of hand-writing raw fanout dictionaries. `examples/airflow_like_fuzz_grouped.py` adds the grouped-reducer variant with `fanout_group_by(...)` plus reducer-local `current.scope` summaries.
 
 ## Example
 
@@ -271,7 +271,7 @@ nodes:
       {% endfor %}
 ```
 
-When runtime Jinja needs the current fanout member itself, use `current.*`. It exposes the active node id, agent, dependencies, and lifted fanout metadata, so staged reducers can filter `fanouts.*` or index into `nodes[...]` without the older placeholder-freezing workaround.
+When runtime Jinja needs the current fanout member itself, use `current.*`. It exposes the active node id, agent, dependencies, and lifted fanout metadata. Reducers created from `fanout.group_by` or `fanout.batches` also get `current.scope`, which mirrors the usual fanout summary surface but only for that reducer's own shard inputs.
 
 When those staged reducers should follow the unique metadata already present on another fanout, use `fanout.group_by` instead of maintaining a second reducer roster:
 
@@ -294,18 +294,18 @@ nodes:
     agent: codex
     depends_on: [fuzzer]
     prompt: |
-      Reduce {{ current.target }} with {{ current.member_ids | length }} scoped shard inputs.
+      Reduce {{ current.target }} with {{ current.scope.size }} scoped shard inputs.
 
-      {% for shard in current.members %}
+      {% for shard in current.scope.with_output.nodes %}
       ## {{ shard.node_id }} :: {{ shard.target }} / {{ shard.sanitizer }} / {{ shard.seed }}
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {{ shard.output }}
 
       {% endfor %}
 ```
 
-`fanout.group_by` preserves first-seen order from the source fanout and, like `fanout.batches`, now exposes `current.member_ids`, `current.members`, and scoped dependencies that point only at matching source shards. That keeps hierarchical reducers aligned with the underlying shard matrix without a duplicate family manifest and lets them start as soon as their own shard family is ready. The bundled `codex-fuzz-hierarchical-grouped` scaffold uses this pattern and scales to 128 shards with `agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set bucket_count=8 --set concurrency=32`.
+`fanout.group_by` preserves first-seen order from the source fanout and, like `fanout.batches`, exposes `current.member_ids`, `current.members`, `current.scope`, and scoped dependencies that point only at matching source shards. That keeps hierarchical reducers aligned with the underlying shard matrix without a duplicate family manifest and lets them start as soon as their own shard family is ready. The bundled `codex-fuzz-hierarchical-grouped` scaffold uses this pattern and scales to 128 shards with `agentflow init fuzz-hierarchical-grouped-128.yaml --template codex-fuzz-hierarchical-grouped --set bucket_count=8 --set concurrency=32`.
 
-When a homogeneous swarm needs intermediate reducers without maintaining a second roster, use `fanout.batches`. Each batch reducer gets the scoped shard ids in `current.member_ids`, the static shard metadata in `current.members`, and automatically rewritten dependencies that point only at that batch's source shards:
+When a homogeneous swarm needs intermediate reducers without maintaining a second roster, use `fanout.batches`. Each batch reducer gets the scoped shard ids in `current.member_ids`, the static shard metadata in `current.members`, reducer-local `current.scope` summaries, and automatically rewritten dependencies that point only at that batch's source shards:
 
 ```yaml
 nodes:
@@ -326,9 +326,9 @@ nodes:
     prompt: |
       Reduce shards {{ current.start_number }} through {{ current.end_number }}.
 
-      {% for shard in current.members %}
-      ## {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})
-      {{ nodes[shard.node_id].output or "(no output)" }}
+      {% for shard in current.scope.with_output.nodes %}
+      ## {{ shard.node_id }} (status: {{ shard.status }})
+      {{ shard.output }}
 
       {% endfor %}
 ```
