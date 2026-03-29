@@ -48,7 +48,7 @@ Each node supports:
 - `tools`: `read_only` or `read_write`
 - `mcps`: a list of MCP server definitions
 - `skills`: a list of local skill paths or names
-- `target`: `local`, `container`, or `aws_lambda`
+- `target`: `local`, `container`, `ssh`, `ec2`, or `ecs`
 - local target fields: `cwd`, `bootstrap`, `shell`, `shell_login`, `shell_interactive`, and `shell_init`
 - `capture`: `final` or `trace`
 - `retries` and `retry_backoff_seconds`
@@ -256,10 +256,6 @@ If one local node should not inherit the shared bootstrap, set `target={"bootstr
 ### Container
 
 Wraps the command in `docker run`, mounts the working directory, runtime directory, and the AgentFlow app, then streams stdout and stderr back into the run trace.
-
-### AWS Lambda
-
-Invokes `agentflow.remote.lambda_handler.handler`. The payload contains the prepared command, environment, runtime files, and execution metadata so the Lambda package can execute the node remotely.
 
 ## Agent notes
 

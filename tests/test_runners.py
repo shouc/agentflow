@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from agentflow.prepared import ExecutionPaths, PreparedExecution
-from agentflow.runners.aws_lambda import AwsLambdaRunner
 from agentflow.runners.container import ContainerRunner
 from agentflow.runners.local import LocalRunner
 from agentflow.specs import LocalTarget, NodeSpec, PipelineSpec
@@ -732,49 +731,6 @@ def test_container_runner_plan_execution_shows_host_and_container_context(tmp_pa
         "engine": "docker",
         "workdir": "/workspace/task",
         "env": {"OPENAI_API_KEY": "secret"},
-    }
-
-
-def test_aws_lambda_runner_plan_execution_captures_invocation_request(tmp_path: Path):
-    node = NodeSpec.model_validate(
-        {
-            "id": "plan-lambda",
-            "agent": "kimi",
-            "prompt": "hi",
-            "timeout_seconds": 45,
-            "target": {
-                "kind": "aws_lambda",
-                "function_name": "agentflow-runner",
-                "region": "us-west-2",
-                "qualifier": "live",
-            },
-        }
-    )
-    prepared = PreparedExecution(
-        command=["kimi", "--print", "--output-format", "stream-json", "--yolo", "-p", "hi"],
-        env={"KIMI_API_KEY": "secret"},
-        cwd="/workspace/task",
-        trace_kind="kimi",
-        stdin="input",
-    )
-
-    plan = AwsLambdaRunner().plan_execution(node, prepared, _paths(tmp_path))
-
-    assert plan.kind == "aws_lambda"
-    assert plan.runtime_files == []
-    assert plan.payload == {
-        "function_name": "agentflow-runner",
-        "region": "us-west-2",
-        "qualifier": "live",
-        "invocation_type": "RequestResponse",
-        "request": {
-            "command": ["kimi", "--print", "--output-format", "stream-json", "--yolo", "-p", "hi"],
-            "env": {"KIMI_API_KEY": "secret"},
-            "cwd": "/tmp/workspace",
-            "stdin": "input",
-            "timeout_seconds": 45,
-            "runtime_files": {},
-        },
     }
 
 

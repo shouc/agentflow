@@ -422,20 +422,46 @@ class SSHTarget(BaseModel):
     remote_workdir: str | None = None
 
 
-class AwsLambdaTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class EC2Target(BaseModel):
+    """Run agent on a fresh EC2 instance, SSH in, execute, then terminate."""
 
-    kind: Literal["aws_lambda"] = "aws_lambda"
-    function_name: str
-    region: str | None = None
-    remote_workdir: str = "/tmp/workspace"
-    role_arn: str | None = None
-    memory_mb: int = 512
-    qualifier: str | None = None
-    invocation_type: Literal["RequestResponse", "Event"] = "RequestResponse"
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["ec2"] = "ec2"
+    region: str = "us-east-1"
+    ami: str | None = None
+    instance_type: str = "t3.medium"
+    key_name: str | None = None
+    security_group_ids: list[str] = Field(default_factory=list)
+    subnet_id: str | None = None
+    username: str = "ubuntu"
+    install_agents: list[str] = Field(default_factory=lambda: ["codex", "claude"])
+    user_data: str | None = None
+    spot: bool = False
 
 
-TargetSpec = Annotated[LocalTarget | ContainerTarget | SSHTarget | AwsLambdaTarget, Field(discriminator="kind")]
+class ECSTarget(BaseModel):
+    """Run agent as an ECS Fargate task."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["ecs"] = "ecs"
+    region: str = "us-east-1"
+    cluster: str = "agentflow"
+    image: str | None = None
+    dockerfile: str | None = None
+    cpu: str = "1024"
+    memory: str = "2048"
+    subnets: list[str] = Field(default_factory=list)
+    security_groups: list[str] = Field(default_factory=list)
+    assign_public_ip: bool = True
+    install_agents: list[str] = Field(default_factory=lambda: ["codex", "claude"])
+
+
+TargetSpec = Annotated[
+    LocalTarget | ContainerTarget | SSHTarget | EC2Target | ECSTarget,
+    Field(discriminator="kind"),
+]
 
 
 class OutputContainsCriterion(BaseModel):

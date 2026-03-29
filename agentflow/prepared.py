@@ -55,15 +55,15 @@ def build_execution_paths(
         host_workdir = pipeline_workdir
         target_workdir = node_target.workdir_mount
         target_runtime_dir = node_target.runtime_mount
-    elif node_target.kind == "aws_lambda":
-        host_workdir = pipeline_workdir
-        target_workdir = node_target.remote_workdir
-        target_runtime_dir = f"{node_target.remote_workdir.rstrip('/')}/.agentflow-runtime/{node_id}"
     elif node_target.kind == "ssh":
         host_workdir = pipeline_workdir
         remote_wd = node_target.remote_workdir or str(pipeline_workdir)
         target_workdir = remote_wd
         target_runtime_dir = f"{remote_wd.rstrip('/')}/.agentflow-runtime/{node_id}"
+    elif node_target.kind in ("ec2", "ecs"):
+        host_workdir = pipeline_workdir
+        target_workdir = "/tmp/workspace"
+        target_runtime_dir = f"/tmp/workspace/.agentflow-runtime/{node_id}"
     else:
         host_workdir = resolve_local_workdir(pipeline_workdir, node_target.cwd)
         target_workdir = str(host_workdir)

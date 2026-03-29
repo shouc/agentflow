@@ -162,7 +162,7 @@ def _payload_summary(node_plan: dict[str, Any]) -> str | None:
         engine = payload.get("engine")
         if image and engine:
             return f"{engine} image={image}"
-    if launch["kind"] == "aws_lambda":
+    if launch["kind"] in ("ec2", "ecs"):
         function_name = payload.get("function_name")
         invocation_type = payload.get("invocation_type")
         if function_name and invocation_type:

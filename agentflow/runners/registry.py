@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from agentflow.runners.aws_lambda import AwsLambdaRunner
 from agentflow.runners.base import Runner
 from agentflow.runners.container import ContainerRunner
+from agentflow.runners.ec2 import EC2Runner
+from agentflow.runners.ecs import ECSRunner
 from agentflow.runners.local import LocalRunner
 from agentflow.runners.ssh import SSHRunner
 
@@ -12,8 +13,9 @@ class RunnerRegistry:
         self._registry: dict[str, Runner] = {
             "local": LocalRunner(),
             "container": ContainerRunner(),
-            "aws_lambda": AwsLambdaRunner(),
             "ssh": SSHRunner(),
+            "ec2": EC2Runner(),
+            "ecs": ECSRunner(),
         }
 
     def register(self, kind: str, runner: Runner) -> None:
