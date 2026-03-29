@@ -120,7 +120,7 @@ def _render_codex_repo_sweep_batched_template(values: Mapping[str, str] | None =
 #   agentflow inspect repo-sweep-batched.py --output summary
 #   agentflow run repo-sweep-batched.py
 
-from agentflow import DAG, codex, fanout_batches, fanout_count
+from agentflow import DAG, codex, fanout, merge
 
 with DAG(
     "$name",
@@ -156,67 +156,69 @@ with DAG(
         ),
     )
 
-    sweep = codex(
-        task_id="sweep",
-        fanout=fanout_count(
-            $shards,
-            as_="shard",
-            derive={"label": "slice {{ shard.number }}/{{ shard.count }}"},
+    sweep = fanout(
+        codex(
+            task_id="sweep",
+            prompt=(
+                "You are Codex repository sweep shard {{ item.number }} of {{ item.count }}.\\n"
+                "\\n"
+                "Shared plan:\\n"
+                "{{ nodes.prepare.output }}\\n"
+                "\\n"
+                "Your shard contract:\\n"
+                "- Stable identity: {{ item.node_id }} (suffix {{ item.suffix }})\\n"
+                "- Review files whose stable path hash modulo {{ item.count }} equals {{ item.index }}.\\n"
+                "- Focus on $focus.\\n"
+                "- Avoid duplicate work outside your modulo slice unless you need one small neighboring file for context.\\n"
+                "- Report concrete findings first. Include file paths, the failure mode, and the missing validation or test if applicable.\\n"
+                "- If your slice is quiet, report the most suspicious code paths worth a second pass.\\n"
+            ),
         ),
-        prompt=(
-            "You are Codex repository sweep shard {{ shard.number }} of {{ shard.count }}.\\n"
-            "\\n"
-            "Shared plan:\\n"
-            "{{ nodes.prepare.output }}\\n"
-            "\\n"
-            "Your shard contract:\\n"
-            "- Stable identity: {{ shard.node_id }} (suffix {{ shard.suffix }})\\n"
-            "- Review files whose stable path hash modulo {{ shard.count }} equals {{ shard.index }}.\\n"
-            "- Focus on $focus.\\n"
-            "- Avoid duplicate work outside your modulo slice unless you need one small neighboring file for context.\\n"
-            "- Report concrete findings first. Include file paths, the failure mode, and the missing validation or test if applicable.\\n"
-            "- If your slice is quiet, report the most suspicious code paths worth a second pass.\\n"
-        ),
+        $shards,
+        derive={"label": "slice {{ item.number }}/{{ item.count }}"},
     )
 
-    batch_merge = codex(
-        task_id="batch_merge",
-        fanout=fanout_batches("sweep", $batch_size, as_="batch"),
-        prompt=(
-            "Prepare the maintainer handoff for review batch {{ current.number }} of {{ current.count }}.\\n"
-            "\\n"
-            "Batch coverage:\\n"
-            "- Source group: {{ current.source_group }}\\n"
-            "- Total source shards: {{ current.source_count }}\\n"
-            "- Batch size: {{ current.scope.size }}\\n"
-            "- Shard range: {{ current.start_number }} through {{ current.end_number }}\\n"
-            '- Shard ids: {{ current.scope.ids | join(", ") }}\\n'
-            "- Completed shards: {{ current.scope.summary.completed }}\\n"
-            "- Failed shards: {{ current.scope.summary.failed }}\\n"
-            "- Silent shards: {{ current.scope.summary.without_output }}\\n"
+    batch_merge = merge(
+        codex(
+            task_id="batch_merge",
+            prompt=(
+                "Prepare the maintainer handoff for review batch {{ item.number }} of {{ item.count }}.\\n"
+                "\\n"
+                "Batch coverage:\\n"
+                "- Source group: {{ item.source_group }}\\n"
+                "- Total source shards: {{ item.source_count }}\\n"
+                "- Batch size: {{ item.scope.size }}\\n"
+                "- Shard range: {{ item.start_number }} through {{ item.end_number }}\\n"
+                '- Shard ids: {{ item.scope.ids | join(", ") }}\\n'
+                "- Completed shards: {{ item.scope.summary.completed }}\\n"
+                "- Failed shards: {{ item.scope.summary.failed }}\\n"
+                "- Silent shards: {{ item.scope.summary.without_output }}\\n"
             "\\n"
             "Rank the batch findings by severity, then confidence, then breadth of impact. "
             "If the batch is quiet, say so explicitly and point to the slices that should be rerun or retargeted.\\n"
             "\\n"
-            "{% for shard in current.scope.with_output.nodes %}\\n"
+            "{% for shard in item.scope.with_output.nodes %}\\n"
             "## {{ shard.label }} :: {{ shard.node_id }} (status: {{ shard.status }})\\n"
             "{{ shard.output }}\\n"
             "\\n"
             "{% endfor %}"
-            "{% if current.scope.failed.size %}\\n"
+            "{% if item.scope.failed.size %}\\n"
             "Failed slices:\\n"
-            "{% for shard in current.scope.failed.nodes %}\\n"
+            "{% for shard in item.scope.failed.nodes %}\\n"
             "- {{ shard.id }} :: {{ shard.label }}\\n"
             "{% endfor %}"
             "{% endif %}"
-            "{% if not current.scope.with_output.size %}\\n"
+            "{% if not item.scope.with_output.size %}\\n"
             "No slice in this batch produced reducer-ready output. "
             "Say that explicitly and use the failed shard list to suggest retargeting.\\n"
             "{% endif %}"
+            ),
         ),
+        sweep,
+        size=$batch_size,
     )
 
-    merge = codex(
+    final = codex(
         task_id="merge",
         prompt=(
             "Consolidate this $shards-shard repository sweep into a maintainer summary.\\n"
@@ -246,7 +248,7 @@ with DAG(
 
     prepare >> sweep
     sweep >> batch_merge
-    batch_merge >> merge
+    batch_merge >> final
 
 print(dag.to_json())
 '''
@@ -270,7 +272,7 @@ _BUNDLED_TEMPLATES = (
     BundledTemplate(
         name="codex-repo-sweep-batched",
         example_name="airflow_like_fuzz_batched.py",
-        description="Configurable large-scale Codex repo sweep that uses `fanout_batches` plus `node_defaults` / `agent_defaults` to keep 128-shard maintainer reviews readable.",
+        description="Configurable large-scale Codex repo sweep that uses `fanout` and `merge` to keep 128-shard maintainer reviews readable.",
         parameters=(
             BundledTemplateParameter(
                 name="shards",

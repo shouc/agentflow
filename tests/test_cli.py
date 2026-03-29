@@ -300,7 +300,7 @@ def test_init_command_prints_codex_repo_sweep_batched_template():
     assert "codex-repo-sweep-batched-128" in result.stdout
     assert "node_defaults" in result.stdout
     assert "agent_defaults" in result.stdout
-    assert "fanout_batches" in result.stdout
+    assert "fanout, merge" in result.stdout
 
 
 def test_init_command_prints_custom_codex_repo_sweep_batched_template():
@@ -330,7 +330,7 @@ def test_init_command_prints_custom_codex_repo_sweep_batched_template():
     assert "./custom_repo_sweep" in result.stdout
     assert "concurrency=20" in result.stdout
     assert "64," in result.stdout
-    assert '"sweep", 8' in result.stdout
+    assert "size=8" in result.stdout
     assert "Focus on security bugs, privilege boundaries, and missing coverage." in result.stdout
 
 
@@ -370,7 +370,7 @@ def test_templates_command_lists_current_bundled_templates():
     assert result.stdout.splitlines() == [
         "Bundled templates:",
         "- pipeline: Generic Codex/Claude/Kimi starter DAG. (source: `examples/airflow_like.py`; use: `agentflow init --template pipeline`)",
-        "- codex-repo-sweep-batched: Configurable large-scale Codex repo sweep that uses `fanout_batches` plus `node_defaults` / `agent_defaults` to keep 128-shard maintainer reviews readable. (params: `shards=128`, `batch_size=16`, `concurrency=32`, `focus=bugs, risky code paths, and missing tests`, `name=codex-repo-sweep-batched-<shards>`, `working_dir=./codex_repo_sweep_batched_<shards>`; source: `examples/airflow_like_fuzz_batched.py`; use: `agentflow init --template codex-repo-sweep-batched`)",
+        "- codex-repo-sweep-batched: Configurable large-scale Codex repo sweep that uses `fanout` and `merge` to keep 128-shard maintainer reviews readable. (params: `shards=128`, `batch_size=16`, `concurrency=32`, `focus=bugs, risky code paths, and missing tests`, `name=codex-repo-sweep-batched-<shards>`, `working_dir=./codex_repo_sweep_batched_<shards>`; source: `examples/airflow_like_fuzz_batched.py`; use: `agentflow init --template codex-repo-sweep-batched`)",
         "- local-kimi-smoke: Local Codex plus Claude-on-Kimi smoke DAG using `bootstrap: kimi`. (source: `examples/local-real-agents-kimi-smoke.py`; use: `agentflow init --template local-kimi-smoke`)",
         "- local-kimi-shell-init-smoke: Local Codex plus Claude-on-Kimi smoke DAG using explicit `shell_init: kimi`. (source: `examples/local-real-agents-kimi-shell-init-smoke.py`; use: `agentflow init --template local-kimi-shell-init-smoke`)",
         "- local-kimi-shell-wrapper-smoke: Local Codex plus Claude-on-Kimi smoke DAG using an explicit `target.shell` Kimi wrapper. (source: `examples/local-real-agents-kimi-shell-wrapper-smoke.py`; use: `agentflow init --template local-kimi-shell-wrapper-smoke`)",

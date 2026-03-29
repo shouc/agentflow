@@ -1,4 +1,4 @@
-from agentflow import DAG, codex, fanout_batches, fanout_count
+from agentflow import DAG, codex, fanout, merge
 
 
 with DAG(
@@ -48,54 +48,56 @@ with DAG(
         ),
     )
 
-    fuzzer = codex(
-        task_id="fuzzer",
-        fanout=fanout_count(
-            128,
-            as_="shard",
-            derive={"workspace": "agents/agent_{{ shard.suffix }}"},
+    fuzzer = fanout(
+        codex(
+            task_id="fuzzer",
+            tools="read_write",
+            target={"cwd": "{{ item.workspace }}"},
+            timeout_seconds=3600,
+            retries=2,
+            prompt=(
+                "You are Codex fuzz shard {{ item.number }} of {{ item.count }} in an authorized campaign.\n\n"
+                "Shared workspace:\n"
+                "- Root: {{ pipeline.working_dir }}\n"
+                "- Shard dir: {{ item.workspace }}\n"
+                "- Crash registry: crashes/README.md\n"
+                "- Shared notes: docs/global_lessons.md\n\n"
+                "Shard contract:\n"
+                "- Own only files under {{ item.workspace }} unless you are appending to the shared docs or crash registry with locking.\n"
+                "- Keep your inputs and notes deterministic so another engineer can replay them.\n"
+                "- Use shard id `{{ item.suffix }}` to vary corpus slices, seeds, flags, or target areas.\n"
+                "- Focus on deep, high-signal failure modes rather than shallow lint or unit-test noise.\n"
+                "- When you confirm a real issue, copy the minimal reproducer into `crashes/` and append a one-line entry to the registry.\n"
+                "- When a target area looks exhausted, write concise lessons to `docs/`.\n"
+                "- Continue searching until timeout."
+            ),
         ),
-        tools="read_write",
-        target={"cwd": "{{ shard.workspace }}"},
-        timeout_seconds=3600,
-        retries=2,
-        prompt=(
-            "You are Codex fuzz shard {{ shard.number }} of {{ shard.count }} in an authorized campaign.\n\n"
-            "Shared workspace:\n"
-            "- Root: {{ pipeline.working_dir }}\n"
-            "- Shard dir: {{ shard.workspace }}\n"
-            "- Crash registry: crashes/README.md\n"
-            "- Shared notes: docs/global_lessons.md\n\n"
-            "Shard contract:\n"
-            "- Own only files under {{ shard.workspace }} unless you are appending to the shared docs or crash registry with locking.\n"
-            "- Keep your inputs and notes deterministic so another engineer can replay them.\n"
-            "- Use shard id `{{ shard.suffix }}` to vary corpus slices, seeds, flags, or target areas.\n"
-            "- Focus on deep, high-signal failure modes rather than shallow lint or unit-test noise.\n"
-            "- When you confirm a real issue, copy the minimal reproducer into `crashes/` and append a one-line entry to the registry.\n"
-            "- When a target area looks exhausted, write concise lessons to `docs/`.\n"
-            "- Continue searching until timeout."
-        ),
+        128,
+        derive={"workspace": "agents/agent_{{ item.suffix }}"},
     )
 
-    batch_merge = codex(
-        task_id="batch_merge",
-        fanout=fanout_batches("fuzzer", 16, as_="batch"),
-        timeout_seconds=300,
-        prompt=(
-            "Prepare the maintainer handoff for shard batch {{ current.number }} of {{ current.count }}.\n\n"
-            "Batch coverage:\n"
-            "- Source group: {{ current.source_group }}\n"
-            "- Total source shards: {{ current.source_count }}\n"
-            "- Batch size: {{ current.size }}\n"
-            "- Shard range: {{ current.start_number }} through {{ current.end_number }}\n"
-            "- Shard ids: {{ current.member_ids | join(', ') }}\n\n"
-            "Focus on confirmed crashers first, then recurring lessons, then quiet shards that need retargeting.\n\n"
-            "{% for shard in current.members %}\n"
-            "### {{ shard.node_id }} (status: {{ nodes[shard.node_id].status }})\n"
-            "Workspace: {{ shard.workspace }}\n"
-            "{{ nodes[shard.node_id].output or '(no output)' }}\n\n"
-            "{% endfor %}"
+    batch_merge = merge(
+        codex(
+            task_id="batch_merge",
+            timeout_seconds=300,
+            prompt=(
+                "Prepare the maintainer handoff for shard batch {{ item.number }} of {{ item.count }}.\n\n"
+                "Batch coverage:\n"
+                "- Source group: {{ item.source_group }}\n"
+                "- Total source shards: {{ item.source_count }}\n"
+                "- Batch size: {{ item.size }}\n"
+                "- Shard range: {{ item.start_number }} through {{ item.end_number }}\n"
+                "- Shard ids: {{ item.member_ids | join(', ') }}\n\n"
+                "Focus on confirmed crashers first, then recurring lessons, then quiet shards that need retargeting.\n\n"
+                "{% for shard in item.scope.with_output.nodes %}\n"
+                "### {{ shard.node_id }} (status: {{ shard.status }})\n"
+                "Workspace: {{ shard.workspace }}\n"
+                "{{ shard.output or '(no output)' }}\n\n"
+                "{% endfor %}"
+            ),
         ),
+        fuzzer,
+        size=16,
     )
 
     monitor = codex(
@@ -109,8 +111,8 @@ with DAG(
         },
         prompt=(
             "You are the periodic campaign monitor for this 128-shard run.\n\n"
-            "Current tick: {{ current.tick_number }}\n"
-            "Tick started at: {{ current.tick_started_at }}\n"
+            "Current tick: {{ item.tick_number }}\n"
+            "Tick started at: {{ item.tick_started_at }}\n"
             "Total shards: {{ fanouts.fuzzer.size }}\n"
             "Completed shards: {{ fanouts.fuzzer.summary.completed }}\n"
             "Running shards: {{ fanouts.fuzzer.summary.running }}\n"
@@ -132,7 +134,7 @@ with DAG(
         ),
     )
 
-    merge = codex(
+    final = codex(
         task_id="merge",
         timeout_seconds=300,
         prompt=(
@@ -159,6 +161,6 @@ with DAG(
 
     init >> [fuzzer, monitor]
     fuzzer >> batch_merge
-    [batch_merge, monitor] >> merge
+    [batch_merge, monitor] >> final
 
 print(dag.to_json())

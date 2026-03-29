@@ -30,8 +30,7 @@ with DAG("demo", working_dir=".", concurrency=3) as dag:
 spec = dag.to_spec()
 ```
 
-The Python helpers accept per-node kwargs including `fanout`.
-Import `fanout_count(...)`, `fanout_values(...)`, `fanout_values_path(...)`, `fanout_matrix(...)`, `fanout_matrix_path(...)`, `fanout_group_by(...)`, or `fanout_batches(...)` for fanout payloads.
+Use `fanout(node, source)` to fan a node into parallel copies and `merge(node, source, by=...|size=...)` to reduce them.
 `DAG(...)` also accepts `fail_fast`, `node_defaults`, `agent_defaults`, and `local_target_defaults`.
 Use `dag.to_json()` to serialize a compact runnable pipeline, `dag.to_payload()` for the raw object structure, and `dag.to_spec()` for the fully expanded in-memory pipeline object.
 
@@ -85,137 +84,109 @@ DAG(
 )
 ```
 
-## Fan-out nodes
+## Fan-out and merge
 
-Use `fanout` when a DAG needs many nearly identical nodes, such as repository sweeps, release checklists, or shardable audits. AgentFlow expands those nodes into an ordinary concrete DAG before validation and execution.
-
-For uniform work, use `fanout_count`:
+Use `fanout()` when a DAG needs many nearly identical nodes. Use `merge()` to reduce them. AgentFlow expands those nodes into a concrete DAG before validation and execution.
 
 ```python
-from agentflow import DAG, codex, fanout_count
+from agentflow import DAG, codex, fanout, merge
 
 with DAG("sweep-demo", concurrency=8) as dag:
-    review = codex(
-        task_id="review",
-        fanout=fanout_count(8, as_="shard"),
-        prompt=(
-            "You are shard {{ shard.number }} of {{ shard.count }}.\n"
-            "Use suffix {{ shard.suffix }} for any per-shard paths.\n"
-        ),
+    review = fanout(
+        codex(task_id="review", prompt="Shard {{ item.number }} of {{ item.count }}."),
+        8,
     )
-    merge = codex(
+    final = codex(
         task_id="merge",
-        prompt=(
-            "{% for shard in fanouts.review.nodes %}\n"
-            "## {{ shard.id }}\n"
-            '{{ shard.output or "(no output)" }}\n\n'
-            "{% endfor %}"
-        ),
+        prompt="{% for s in fanouts.review.nodes %}{{ s.output }}\n{% endfor %}",
     )
-    review >> merge
+    review >> final
 ```
 
-For scaffolds, start with one of the bundled templates:
+### `item` shape (fanout)
 
-```bash
-agentflow init > pipeline.py
-agentflow init repo-sweep-batched.py --template codex-repo-sweep-batched
-```
+Every expanded copy gets an `item` template variable:
 
-When each member needs explicit metadata, use `fanout_values`:
+| Field | Type | Example |
+| --- | --- | --- |
+| `item.index` | int | 0, 1, 2, ... |
+| `item.number` | int | 1, 2, 3, ... (1-indexed) |
+| `item.count` | int | total copies |
+| `item.suffix` | str | "0", "01", "001" (zero-padded) |
+| `item.node_id` | str | "review_001" |
+| `item.value` | Any | the raw iteration value |
+| `item.<key>` | Any | dict keys from value are lifted (e.g. `item.target`) |
+| `item.<key>` | Any | keys from `derive={}` are added |
+
+### `item` shape (merge)
+
+Reducer nodes get everything above plus:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `item.source_group` | str | task_id of the fanout being reduced |
+| `item.source_count` | int | total members in the source fanout |
+| `item.member_ids` | list | node IDs of members in this group/batch |
+| `item.members` | list | full member objects |
+| `item.size` | int | members in this group/batch |
+
+With `size=` (batches): `item.start_number`, `item.end_number`, `item.start_index`, `item.end_index`.
+
+With `by=` (groups): the grouping field values are on `item` directly (e.g. `item.target`).
+
+At runtime, `item.scope` provides aggregated results:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `item.scope.ids` | list | member node IDs |
+| `item.scope.size` | int | count |
+| `item.scope.nodes` | list | member objects with status/output |
+| `item.scope.outputs` | list | output strings |
+| `item.scope.summary` | dict | {total, completed, failed, with_output, ...} |
+| `item.scope.with_output` | subset | members with non-empty output |
+| `item.scope.without_output` | subset | members with empty output |
+
+### Source types
+
+`fanout(node, source)` dispatches on type:
+
+- `int` -- count: `fanout(node, 128)`
+- `list` -- values: `fanout(node, [{"repo": "api"}, {"repo": "billing"}])`
+- `dict` -- matrix (cartesian product): `fanout(node, {"repo": [...], "check": [...]})`
+
+Matrix supports `include=` and `exclude=` for curated adjustments.
+
+### Reducer modes
+
+`merge(node, source_node)` requires exactly one of `by=` or `size=`:
+
+- `by=["field", ...]` -- one reducer per unique field combination
+- `size=N` -- one reducer per N-item batch
+
+### Derived fields
+
+Add computed fields with `derive=`:
 
 ```python
-from agentflow import fanout_values
-
-fanout=fanout_values(
-    [
-        {"repo": "api", "owner": "platform", "priority": "high"},
-        {"repo": "billing", "owner": "payments", "priority": "medium"},
-    ],
-    as_="shard",
-)
-```
-
-When the metadata is naturally multi-axis, use `fanout_matrix`. Add `exclude` and `include` when a cartesian product needs curated adjustments:
-
-```python
-from agentflow import fanout_matrix
-
-fanout=fanout_matrix(
-    {
-        "repo": [
-            {"name": "api", "owner": "platform"},
-            {"name": "billing", "owner": "payments"},
-        ],
-        "check": [{"kind": "security"}, {"kind": "docs"}],
-    },
-    as_="shard",
-    exclude=[{"name": "billing", "kind": "docs"}],
-    include=[{"repo": {"name": "marketing", "owner": "growth"}, "check": {"kind": "docs"}}],
-)
-```
-
-When prompts and workdirs should share computed fields, add `derive`:
-
-```python
-fanout=fanout_matrix(
-    {
-        "repo": [{"name": "api"}, {"name": "billing"}],
-        "check": [{"kind": "security"}, {"kind": "docs"}],
-    },
-    as_="shard",
+fanout(
+    codex(task_id="review", prompt="Work in {{ item.workspace }}"),
+    {"repo": [{"name": "api"}, {"name": "billing"}], "check": [{"kind": "security"}]},
     derive={
-        "label": "{{ shard.name }}/{{ shard.kind }}",
-        "workspace": "agents/{{ shard.name }}_{{ shard.kind }}_{{ shard.suffix }}",
+        "label": "{{ item.name }}/{{ item.kind }}",
+        "workspace": "agents/{{ item.name }}_{{ item.kind }}_{{ item.suffix }}",
     },
 )
 ```
 
-When the roster should live outside the pipeline file, use `fanout_values_path` or `fanout_matrix_path`. `values_path` accepts JSON lists and CSV rows. `matrix_path` accepts JSON objects. Relative paths resolve from the pipeline file.
+### Expansion rules
 
-```python
-from agentflow import fanout_values_path
-
-fanout=fanout_values_path("manifests/repos.json", as_="shard")
-```
-
-When reducers should follow fields already present on another fanout, use `fanout_group_by`:
-
-```python
-from agentflow import fanout_group_by
-
-family_merge = codex(
-    task_id="owner_merge",
-    fanout=fanout_group_by("review", ["owner"], as_="owner"),
-    prompt=(
-        "Reduce {{ current.owner }} with {{ current.member_ids | length }} scoped inputs.\n\n"
-        "{% for shard in current.scope.with_output.nodes %}\n"
-        "## {{ shard.node_id }} :: {{ shard.repo }}\n"
-        "{{ shard.output }}\n\n"
-        "{% endfor %}"
-    ),
-)
-```
-
-When one final reducer would be too noisy, use `fanout_batches`:
-
-```python
-from agentflow import fanout_batches
-
-batch_merge = codex(
-    task_id="batch_merge",
-    fanout=fanout_batches("review", 16, as_="batch"),
-    prompt=(
-        "Reduce shards {{ current.start_number }} through {{ current.end_number }}.\n\n"
-        "{% for shard in current.scope.with_output.nodes %}\n"
-        "## {{ shard.node_id }} (status: {{ shard.status }})\n"
-        "{{ shard.output }}\n\n"
-        "{% endfor %}"
-    ),
-)
-```
-
-Prompt rendering exposes `fanouts.<group>.nodes`, `outputs`, `values`, `summary`, `completed`, `failed`, `with_output`, and `without_output`. Reducers created from `fanout_group_by` or `fanout_batches` also get `current.member_ids`, `current.members`, and `current.scope`.
+- A fan-out node expands to `review_0` through `review_7` (zero-padded when needed).
+- Dict keys from values are lifted onto `item` (e.g. `item.target`).
+- Matrix expands the cartesian product in declaration order.
+- `merge` with `by=` creates one reducer per unique field combination.
+- `merge` with `size=` partitions into fixed-size batches.
+- A downstream `>>` dependency on a fanout node expands to all its members.
+- `derive` fields render in declaration order after base expansion.
 
 ## Periodic nodes
 
@@ -230,31 +201,17 @@ monitor = codex(
         "actuation": "output_json",
     },
     prompt=(
-        "Tick {{ current.tick_number }}\n"
+        "Tick {{ item.tick_number }}\n"
         "{% for shard in fanouts.worker.nodes %}\n"
-        "- {{ shard.id }} stdout={{ shard.artifacts.stdout_log }} stderr={{ shard.artifacts.stderr_log }}\n"
+        "- {{ shard.id }} stdout={{ shard.artifacts.stdout_log }}\n"
         "{% endfor %}"
     ),
 )
 ```
 
-Periodic nodes are local-only in v1. They stop automatically once the watched fanout group reaches terminal state. Prompt rendering also exposes `current.tick_number`, `current.tick_started_at`, and per-node artifact paths such as `shard.artifacts.stdout_log` so a collector can grep full shard logs directly.
+Periodic nodes are local-only in v1. They stop automatically once the watched fanout group reaches terminal state.
 
 With `actuation: output_json`, the node may emit a JSON envelope with an `analysis` string plus `cancel` / `rerun` actions for members of the watched fanout group.
-
-Expansion rules:
-
-- A fan-out node accepts exactly one expansion mode: `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, or `batches`.
-- A fan-out node with `id: review` and `count: 8` expands to `review_0` through `review_7`. The suffix is zero-padded when needed.
-- `fanout_values` and `fanout_values_path` lift identifier-friendly dictionary keys onto the alias.
-- `fanout_matrix` and `fanout_matrix_path` expand the cartesian product in declaration order. Axis dictionaries are available both under the axis name and as lifted keys.
-- `fanout_group_by` creates one reducer member per unique field combination from the source fanout, in first-seen order.
-- `fanout_batches` partitions a source fanout into fixed-size reducer groups.
-- `exclude` removes matrix members whose metadata matches every field in a selector object. `include` appends explicit members after exclusions.
-- `derive` adds computed fields after the base expansion is resolved. Derived fields render in declaration order.
-- `as` picks the template variable name for pre-validation substitution.
-- Ordinary runtime prompt templates such as `{{ nodes.prepare.output }}` are left intact and still render at execution time.
-- A downstream `depends_on: [review]` expands to all members of the `review` group.
 
 Runtime numeric settings are validated up front: `concurrency` must be at least `1`, `timeout_seconds` must be greater than `0`, and both `retries` and `retry_backoff_seconds` must be non-negative.
 

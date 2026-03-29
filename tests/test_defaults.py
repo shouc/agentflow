@@ -30,8 +30,8 @@ def test_bundled_templates_expose_current_descriptions_and_example_files():
     assert by_name["pipeline"].parameters == ()
     assert by_name["pipeline"].support_files == ()
     assert by_name["codex-repo-sweep-batched"].example_name == "airflow_like_fuzz_batched.py"
-    assert "fanout_batches" in by_name["codex-repo-sweep-batched"].description
-    assert "node_defaults" in by_name["codex-repo-sweep-batched"].description
+    assert "fanout" in by_name["codex-repo-sweep-batched"].description
+    assert "merge" in by_name["codex-repo-sweep-batched"].description
     assert tuple(parameter.name for parameter in by_name["codex-repo-sweep-batched"].parameters) == (
         "shards",
         "batch_size",
@@ -160,7 +160,7 @@ def test_bundled_codex_repo_sweep_batched_template_supports_overrides(tmp_path):
     assert "Focus on security bugs, privilege boundaries, and missing coverage." in rendered
     assert "node_defaults" in rendered
     assert "agent_defaults" in rendered
-    assert "current.scope.ids" in rendered
+    assert "item.scope.ids" in rendered
     assert "fanouts.batch_merge.with_output.nodes" in rendered
 
     pipeline_path = tmp_path / "custom-repo-sweep.py"

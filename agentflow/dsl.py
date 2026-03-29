@@ -4,7 +4,6 @@ from copy import deepcopy
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import json
-from os import PathLike
 from typing import Any
 
 from agentflow.specs import AgentKind, LocalTarget, NodeSpec, PipelineSpec
@@ -158,93 +157,143 @@ def _node(agent: AgentKind, *, task_id: str, prompt: str, **kwargs: Any) -> Node
     return NodeBuilder(dag=_current_dag(), id=task_id, agent=agent, prompt=prompt, kwargs=kwargs)
 
 
-def _fanout_payload(
-    mode: dict[str, Any],
+# ---------------------------------------------------------------------------
+# Fanout & merge
+# ---------------------------------------------------------------------------
+
+
+def fanout(
+    node: NodeBuilder,
+    source: int | list[Any] | dict[str, list[Any]],
     *,
-    as_: str = "item",
     derive: dict[str, Any] | None = None,
     include: list[dict[str, Any]] | None = None,
     exclude: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    payload = {"as": as_, **deepcopy(mode)}
+) -> NodeBuilder:
+    """Fan a node out into many parallel copies.
+
+    *source* selects the expansion mode:
+
+    - ``int``  -- uniform count  (``fanout(node, 128)``)
+    - ``list`` -- explicit values (``fanout(node, [{"repo": "api"}, ...])``)
+    - ``dict`` -- cartesian matrix (``fanout(node, {"axis": [...], ...})``)
+
+    Every expanded copy gets an ``item`` template variable with these fields:
+
+    ======== ===== ============================================
+    Field    Type  Example
+    ======== ===== ============================================
+    index    int   0, 1, 2, ...
+    number   int   1, 2, 3, ... (1-indexed)
+    count    int   total copies
+    suffix   str   "0", "01", "001" (zero-padded)
+    node_id  str   "fuzzer_001"
+    value    Any   the raw iteration value
+    *(keys)* Any   dict keys from value are lifted
+    *(keys)* Any   keys from *derive* are added
+    ======== ===== ============================================
+
+    Use ``{{ item.number }}``, ``{{ item.suffix }}``, etc. in prompts
+    and target paths.
+    """
+    if isinstance(source, int):
+        mode: dict[str, Any] = {"count": source}
+    elif isinstance(source, list):
+        mode = {"values": deepcopy(source)}
+    elif isinstance(source, dict):
+        mode = {"matrix": deepcopy(source)}
+    else:
+        raise TypeError(f"fanout source must be int, list, or dict; got {type(source).__name__}")
+
+    if include is not None and not isinstance(source, dict):
+        raise TypeError("include is only valid for matrix fanout (dict source)")
+    if exclude is not None and not isinstance(source, dict):
+        raise TypeError("exclude is only valid for matrix fanout (dict source)")
+
+    payload: dict[str, Any] = {"as": "item", **mode}
     if derive is not None:
         payload["derive"] = deepcopy(derive)
     if include is not None:
         payload["include"] = deepcopy(include)
     if exclude is not None:
         payload["exclude"] = deepcopy(exclude)
-    return payload
+    node.kwargs["fanout"] = payload
+    return node
 
 
-def fanout_count(count: int, *, as_: str = "item", derive: dict[str, Any] | None = None) -> dict[str, Any]:
-    return _fanout_payload({"count": count}, as_=as_, derive=derive)
-
-
-def fanout_values(values: list[Any], *, as_: str = "item", derive: dict[str, Any] | None = None) -> dict[str, Any]:
-    return _fanout_payload({"values": values}, as_=as_, derive=derive)
-
-
-def fanout_values_path(
-    path: str | PathLike[str],
+def merge(
+    node: NodeBuilder,
+    source: NodeBuilder,
     *,
-    as_: str = "item",
+    by: list[str] | None = None,
+    size: int | None = None,
     derive: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _fanout_payload({"values_path": str(path)}, as_=as_, derive=derive)
+) -> NodeBuilder:
+    """Merge (reduce) the results of a prior fanout group.
+
+    Exactly one of *by* or *size* must be given:
+
+    - ``by=["field", ...]`` -- one reducer per unique field combination
+    - ``size=N`` -- one reducer per N-item batch
+
+    The ``item`` template variable has all the same fields as a fanout
+    ``item``, plus these reducer-specific fields:
+
+    ============= ====== ============================================
+    Field         Type   Description
+    ============= ====== ============================================
+    source_group  str    task_id of the fanout being reduced
+    source_count  int    total members in the source fanout
+    member_ids    list   node IDs of the members in this group/batch
+    members       list   full member objects
+    size          int    members in this group/batch
+    ============= ====== ============================================
+
+    With ``by=``, the grouping field values are also on ``item``
+    (e.g. ``{{ item.target }}``).
+
+    With ``size=``, batch range fields are added:
+    ``start_number``, ``end_number``, ``start_index``, ``end_index``,
+    ``start_suffix``, ``end_suffix``.
+
+    At runtime, ``item.scope`` provides the aggregated results of the
+    source members in this group/batch:
+
+    ============== ====== ============================================
+    Field          Type   Description
+    ============== ====== ============================================
+    scope.ids      list   member node IDs
+    scope.size     int    count
+    scope.nodes    list   full member objects with status/output
+    scope.outputs  list   output strings
+    scope.summary  dict   {total, completed, failed, with_output, ...}
+    scope.with_output    subset with non-empty output
+    scope.without_output subset with empty output
+    ============== ====== ============================================
+
+    Use ``{{ item.scope.with_output.nodes }}`` in Jinja2 loops to
+    iterate over completed source members.
+    """
+    if by is not None and size is not None:
+        raise TypeError("specify either by= or size=, not both")
+
+    if by is not None:
+        mode: dict[str, Any] = {"group_by": {"from": source.id, "fields": list(by)}}
+    elif size is not None:
+        mode = {"batches": {"from": source.id, "size": size}}
+    else:
+        raise TypeError("merge() requires either by= or size=")
+
+    payload: dict[str, Any] = {"as": "item", **mode}
+    if derive is not None:
+        payload["derive"] = deepcopy(derive)
+    node.kwargs["fanout"] = payload
+    return node
 
 
-def fanout_matrix(
-    matrix: dict[str, list[Any]],
-    *,
-    as_: str = "item",
-    derive: dict[str, Any] | None = None,
-    include: list[dict[str, Any]] | None = None,
-    exclude: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    return _fanout_payload(
-        {"matrix": matrix},
-        as_=as_,
-        derive=derive,
-        include=include,
-        exclude=exclude,
-    )
-
-
-def fanout_matrix_path(
-    path: str | PathLike[str],
-    *,
-    as_: str = "item",
-    derive: dict[str, Any] | None = None,
-    include: list[dict[str, Any]] | None = None,
-    exclude: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    return _fanout_payload(
-        {"matrix_path": str(path)},
-        as_=as_,
-        derive=derive,
-        include=include,
-        exclude=exclude,
-    )
-
-
-def fanout_group_by(
-    from_: str,
-    fields: list[str],
-    *,
-    as_: str = "item",
-    derive: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _fanout_payload({"group_by": {"from": from_, "fields": list(fields)}}, as_=as_, derive=derive)
-
-
-def fanout_batches(
-    from_: str,
-    size: int,
-    *,
-    as_: str = "item",
-    derive: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _fanout_payload({"batches": {"from": from_, "size": size}}, as_=as_, derive=derive)
+# ---------------------------------------------------------------------------
+# Agent helpers
+# ---------------------------------------------------------------------------
 
 
 def codex(*, task_id: str, prompt: str, **kwargs: Any) -> NodeBuilder:

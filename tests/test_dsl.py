@@ -2,18 +2,15 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from agentflow import (
     DAG,
     claude,
     codex,
-    fanout_batches,
-    fanout_count,
-    fanout_group_by,
-    fanout_matrix,
-    fanout_matrix_path,
-    fanout_values,
-    fanout_values_path,
+    fanout,
     kimi,
+    merge,
 )
 from agentflow.loader import load_pipeline_from_text
 
@@ -30,72 +27,100 @@ def _run_example(name: str):
     return load_pipeline_from_text(completed.stdout, base_dir=repo_root)
 
 
-def test_fanout_helpers_build_generic_payloads():
-    assert fanout_count(3, as_="shard", derive={"workspace": "agents/{{ shard.suffix }}"}) == {
-        "count": 3,
-        "as": "shard",
-        "derive": {"workspace": "agents/{{ shard.suffix }}"},
-    }
-    assert fanout_values(
-        [{"target": "libpng"}, {"target": "sqlite"}],
-        as_="shard",
-        derive={"workspace": "agents/{{ shard.target }}_{{ shard.suffix }}"},
-    ) == {
-        "values": [{"target": "libpng"}, {"target": "sqlite"}],
-        "as": "shard",
-        "derive": {"workspace": "agents/{{ shard.target }}_{{ shard.suffix }}"},
-    }
-    assert fanout_values_path(Path("catalog.csv"), as_="shard") == {
-        "values_path": "catalog.csv",
-        "as": "shard",
-    }
-    assert fanout_matrix(
-        {
-            "family": [{"target": "libpng"}],
-            "variant": [{"sanitizer": "asan"}],
-        },
-        as_="shard",
-        derive={"workspace": "agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.suffix }}"},
-        include=[{"family": {"target": "openssl"}, "variant": {"sanitizer": "asan"}}],
-        exclude=[{"family": {"target": "sqlite"}}],
-    ) == {
-        "matrix": {
-            "family": [{"target": "libpng"}],
-            "variant": [{"sanitizer": "asan"}],
-        },
-        "as": "shard",
-        "derive": {"workspace": "agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.suffix }}"},
-        "include": [{"family": {"target": "openssl"}, "variant": {"sanitizer": "asan"}}],
-        "exclude": [{"family": {"target": "sqlite"}}],
-    }
-    assert fanout_matrix_path(
-        Path("axes.yaml"),
-        as_="shard",
-        derive={"workspace": "agents/{{ shard.suffix }}"},
-        include=[{"family": {"target": "openssl"}}],
-        exclude=[{"family": {"target": "sqlite"}}],
-    ) == {
-        "matrix_path": "axes.yaml",
-        "as": "shard",
-        "derive": {"workspace": "agents/{{ shard.suffix }}"},
-        "include": [{"family": {"target": "openssl"}}],
-        "exclude": [{"family": {"target": "sqlite"}}],
-    }
-    assert fanout_group_by(
-        "fuzzer",
-        ["target", "corpus"],
-        as_="family",
-        derive={"label": "{{ family.target }} / {{ family.corpus }}"},
-    ) == {
-        "group_by": {"from": "fuzzer", "fields": ["target", "corpus"]},
-        "as": "family",
-        "derive": {"label": "{{ family.target }} / {{ family.corpus }}"},
-    }
-    assert fanout_batches("fuzzer", 4, as_="batch", derive={"label": "{{ batch.number }}"}) == {
-        "batches": {"from": "fuzzer", "size": 4},
-        "as": "batch",
-        "derive": {"label": "{{ batch.number }}"},
-    }
+def test_fanout_and_merge_build_correct_payloads():
+    with DAG("payload-test") as dag:
+        # count
+        n = fanout(codex(task_id="c", prompt="p"), 3)
+        assert n.kwargs["fanout"] == {"count": 3, "as": "item"}
+
+        # count with derive
+        n = fanout(
+            codex(task_id="cd", prompt="p"),
+            3,
+            derive={"workspace": "agents/{{ item.suffix }}"},
+        )
+        assert n.kwargs["fanout"] == {
+            "count": 3,
+            "as": "item",
+            "derive": {"workspace": "agents/{{ item.suffix }}"},
+        }
+
+        # values
+        n = fanout(
+            codex(task_id="v", prompt="p"),
+            [{"target": "libpng"}, {"target": "sqlite"}],
+        )
+        assert n.kwargs["fanout"] == {
+            "values": [{"target": "libpng"}, {"target": "sqlite"}],
+            "as": "item",
+        }
+
+        # matrix with include/exclude
+        n = fanout(
+            codex(task_id="m", prompt="p"),
+            {
+                "family": [{"target": "libpng"}],
+                "variant": [{"sanitizer": "asan"}],
+            },
+            include=[{"family": {"target": "openssl"}, "variant": {"sanitizer": "asan"}}],
+            exclude=[{"family": {"target": "sqlite"}}],
+        )
+        assert n.kwargs["fanout"] == {
+            "matrix": {
+                "family": [{"target": "libpng"}],
+                "variant": [{"sanitizer": "asan"}],
+            },
+            "as": "item",
+            "include": [{"family": {"target": "openssl"}, "variant": {"sanitizer": "asan"}}],
+            "exclude": [{"family": {"target": "sqlite"}}],
+        }
+
+        # merge with size (batches)
+        src = codex(task_id="src", prompt="p")
+        n = merge(codex(task_id="b", prompt="p"), src, size=4)
+        assert n.kwargs["fanout"] == {
+            "batches": {"from": "src", "size": 4},
+            "as": "item",
+        }
+
+        # merge with by (group_by)
+        n = merge(
+            codex(task_id="g", prompt="p"),
+            src,
+            by=["target", "corpus"],
+            derive={"label": "{{ item.target }} / {{ item.corpus }}"},
+        )
+        assert n.kwargs["fanout"] == {
+            "group_by": {"from": "src", "fields": ["target", "corpus"]},
+            "as": "item",
+            "derive": {"label": "{{ item.target }} / {{ item.corpus }}"},
+        }
+
+
+def test_fanout_rejects_invalid_source_type():
+    with DAG("err-test") as dag:
+        with pytest.raises(TypeError, match="int, list, or dict"):
+            fanout(codex(task_id="bad", prompt="p"), "not_valid")
+
+
+def test_fanout_rejects_include_on_non_matrix():
+    with DAG("err-test2") as dag:
+        with pytest.raises(TypeError, match="include is only valid for matrix"):
+            fanout(codex(task_id="bad", prompt="p"), [1, 2], include=[{}])
+
+
+def test_merge_rejects_both_by_and_size():
+    with DAG("err-test3") as dag:
+        src = codex(task_id="src", prompt="p")
+        with pytest.raises(TypeError, match="either by= or size="):
+            merge(codex(task_id="bad", prompt="p"), src, by=["x"], size=2)
+
+
+def test_merge_rejects_neither_by_nor_size():
+    with DAG("err-test4") as dag:
+        src = codex(task_id="src", prompt="p")
+        with pytest.raises(TypeError, match="requires either by= or size="):
+            merge(codex(task_id="bad", prompt="p"), src)
 
 
 def test_airflow_like_dag_builds_dependencies():
@@ -103,9 +128,9 @@ def test_airflow_like_dag_builds_dependencies():
         plan = codex(task_id="plan", prompt="plan")
         implement = claude(task_id="implement", prompt="implement")
         review = kimi(task_id="review", prompt="review")
-        merge = codex(task_id="merge", prompt="merge")
+        final = codex(task_id="merge", prompt="merge")
         plan >> [implement, review]
-        [implement, review] >> merge
+        [implement, review] >> final
 
     spec = dag.to_spec()
     nodes = spec.node_map
@@ -159,14 +184,13 @@ def test_airflow_like_dag_supports_pipeline_defaults_and_count_fanout():
         },
     ) as dag:
         prepare = codex(task_id="prepare", prompt="prepare")
-        fuzzer = codex(
-            task_id="fuzzer",
-            prompt="fuzz shard {{ shard.number }}",
-            fanout=fanout_count(4, as_="shard"),
+        fuzzer = fanout(
+            codex(task_id="fuzzer", prompt="fuzz item {{ item.number }}"),
+            4,
         )
-        merge = codex(task_id="merge", prompt="merge")
+        final = codex(task_id="merge", prompt="merge")
         prepare >> fuzzer
-        fuzzer >> merge
+        fuzzer >> final
 
     payload = dag.to_payload()
     spec = dag.to_spec()
@@ -175,7 +199,7 @@ def test_airflow_like_dag_supports_pipeline_defaults_and_count_fanout():
     assert payload["fail_fast"] is True
     assert payload["node_defaults"] == {"tools": "read_only", "capture": "final"}
     assert payload["agent_defaults"]["codex"]["model"] == "gpt-5-codex"
-    assert payload["nodes"][1]["fanout"] == {"count": 4, "as": "shard"}
+    assert payload["nodes"][1]["fanout"] == {"count": 4, "as": "item"}
     assert spec.working_dir == "/tmp/fanout-work"
     assert spec.concurrency == 16
     assert spec.fail_fast is True
@@ -199,7 +223,7 @@ def test_airflow_like_dag_supports_pipeline_defaults_and_count_fanout():
     assert nodes["merge"].retries == 1
 
 
-def test_airflow_like_dag_supports_matrix_and_batch_fanout_helpers():
+def test_airflow_like_dag_supports_matrix_and_batch_merge():
     with DAG(
         "batched-fuzz",
         working_dir="/tmp/batched-fuzz",
@@ -216,34 +240,36 @@ def test_airflow_like_dag_supports_matrix_and_batch_fanout_helpers():
         },
     ) as dag:
         init = codex(task_id="init", prompt="init", tools="read_write")
-        fuzzer = codex(
-            task_id="fuzzer",
-            prompt="fuzz {{ shard.target }} {{ shard.sanitizer }} inside {{ shard.workspace }}",
-            fanout=fanout_matrix(
-                {
-                    "family": [
-                        {"target": "libpng"},
-                        {"target": "sqlite"},
-                    ],
-                    "variant": [
-                        {"sanitizer": "asan"},
-                        {"sanitizer": "ubsan"},
-                    ],
-                },
-                as_="shard",
-                derive={"workspace": "agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.suffix }}"},
+        fuzzer = fanout(
+            codex(
+                task_id="fuzzer",
+                prompt="fuzz {{ item.target }} {{ item.sanitizer }} inside {{ item.workspace }}",
+                target={"cwd": "{{ item.workspace }}"},
             ),
-            target={"cwd": "{{ shard.workspace }}"},
+            {
+                "family": [
+                    {"target": "libpng"},
+                    {"target": "sqlite"},
+                ],
+                "variant": [
+                    {"sanitizer": "asan"},
+                    {"sanitizer": "ubsan"},
+                ],
+            },
+            derive={"workspace": "agents/{{ item.target }}_{{ item.sanitizer }}_{{ item.suffix }}"},
         )
-        batch_merge = codex(
-            task_id="batch_merge",
-            prompt="reduce batch {{ current.number }} covering {{ current.member_ids | join(', ') }}",
-            fanout=fanout_batches("fuzzer", 2, as_="batch"),
+        batch_merge = merge(
+            codex(
+                task_id="batch_merge",
+                prompt="reduce batch {{ item.number }} covering {{ item.member_ids | join(', ') }}",
+            ),
+            fuzzer,
+            size=2,
         )
-        merge = codex(task_id="merge", prompt="merge")
+        final = codex(task_id="merge", prompt="merge")
         init >> fuzzer
         fuzzer >> batch_merge
-        batch_merge >> merge
+        batch_merge >> final
 
     spec = dag.to_spec()
     nodes = spec.node_map
@@ -264,7 +290,7 @@ def test_airflow_like_dag_supports_matrix_and_batch_fanout_helpers():
     assert nodes["merge"].depends_on == ["batch_merge_0", "batch_merge_1"]
 
 
-def test_airflow_like_dag_supports_grouped_fanout_helpers():
+def test_airflow_like_dag_supports_grouped_merge():
     with DAG(
         "grouped-fuzz",
         working_dir="/tmp/grouped-fuzz",
@@ -281,34 +307,36 @@ def test_airflow_like_dag_supports_grouped_fanout_helpers():
         },
     ) as dag:
         init = codex(task_id="init", prompt="init", tools="read_write")
-        fuzzer = codex(
-            task_id="fuzzer",
-            prompt="fuzz {{ shard.target }} {{ shard.sanitizer }} inside {{ shard.workspace }}",
-            fanout=fanout_matrix(
-                {
-                    "family": [
-                        {"target": "libpng", "corpus": "png"},
-                        {"target": "sqlite", "corpus": "sql"},
-                    ],
-                    "variant": [
-                        {"sanitizer": "asan"},
-                        {"sanitizer": "ubsan"},
-                    ],
-                },
-                as_="shard",
-                derive={"workspace": "agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.suffix }}"},
+        fuzzer = fanout(
+            codex(
+                task_id="fuzzer",
+                prompt="fuzz {{ item.target }} {{ item.sanitizer }} inside {{ item.workspace }}",
+                target={"cwd": "{{ item.workspace }}"},
             ),
-            target={"cwd": "{{ shard.workspace }}"},
+            {
+                "family": [
+                    {"target": "libpng", "corpus": "png"},
+                    {"target": "sqlite", "corpus": "sql"},
+                ],
+                "variant": [
+                    {"sanitizer": "asan"},
+                    {"sanitizer": "ubsan"},
+                ],
+            },
+            derive={"workspace": "agents/{{ item.target }}_{{ item.sanitizer }}_{{ item.suffix }}"},
         )
-        family_merge = codex(
-            task_id="family_merge",
-            prompt="group {{ current.target }} has {{ current.scope.size }} shards",
-            fanout=fanout_group_by("fuzzer", ["target", "corpus"], as_="family"),
+        family_merge = merge(
+            codex(
+                task_id="family_merge",
+                prompt="group {{ item.target }} has {{ item.scope.size }} shards",
+            ),
+            fuzzer,
+            by=["target", "corpus"],
         )
-        merge = codex(task_id="merge", prompt="merge")
+        final = codex(task_id="merge", prompt="merge")
         init >> fuzzer
         fuzzer >> family_merge
-        family_merge >> merge
+        family_merge >> final
 
     spec = dag.to_spec()
     nodes = spec.node_map
@@ -343,7 +371,7 @@ def test_airflow_like_dag_can_render_json():
     assert spec_from_json.node_map["plan"].prompt == "line one\nline two"
 
 
-def test_airflow_like_dag_supports_values_path_and_batch_fanout_helpers(tmp_path):
+def test_airflow_like_dag_supports_values_path_fanout(tmp_path):
     workspace = tmp_path / "workspace"
     catalog_path = workspace / "catalog.csv"
     catalog_path.parent.mkdir(parents=True)
@@ -373,20 +401,23 @@ def test_airflow_like_dag_supports_values_path_and_batch_fanout_helpers(tmp_path
         init = codex(task_id="init", prompt="init", tools="read_write")
         fuzzer = codex(
             task_id="fuzzer",
-            prompt="fuzz {{ shard.label }} inside {{ shard.workspace }}",
-            fanout=fanout_values_path(catalog_path, as_="shard"),
+            prompt="fuzz {{ item.label }} inside {{ item.workspace }}",
+            fanout={"values_path": str(catalog_path), "as": "item"},
             tools="read_write",
-            target={"cwd": "{{ shard.workspace }}"},
+            target={"cwd": "{{ item.workspace }}"},
         )
-        batch_merge = codex(
-            task_id="batch_merge",
-            prompt="reduce {{ current.scope.ids | join(', ') }}",
-            fanout=fanout_batches("fuzzer", 1, as_="batch"),
+        batch_merge = merge(
+            codex(
+                task_id="batch_merge",
+                prompt="reduce {{ item.scope.ids | join(', ') }}",
+            ),
+            fuzzer,
+            size=1,
         )
-        merge = codex(task_id="merge", prompt="merge")
+        final = codex(task_id="merge", prompt="merge")
         init >> fuzzer
         fuzzer >> batch_merge
-        batch_merge >> merge
+        batch_merge >> final
 
     spec = dag.to_spec()
     nodes = spec.node_map
@@ -426,7 +457,7 @@ def test_airflow_like_fuzz_batched_example_emits_valid_pipeline():
     assert spec.node_map["monitor"].schedule.every_seconds == 600
     assert spec.node_map["monitor"].schedule.until_fanout_settles_from == "fuzzer"
     assert spec.node_map["batch_merge_0"].prompt.startswith(
-        "Prepare the maintainer handoff for shard batch {{ current.number }} of {{ current.count }}."
+        "Prepare the maintainer handoff for shard batch 1 of 8."
     )
     assert spec.node_map["merge"].depends_on == [*spec.fanouts["batch_merge"], "monitor"]
 
@@ -456,6 +487,6 @@ def test_airflow_like_fuzz_grouped_example_emits_valid_pipeline():
     assert spec.node_map["family_merge_0"].depends_on == spec.fanouts["fuzzer"][:32]
     assert spec.node_map["family_merge_3"].fanout_member["target"] == "sqlite"
     assert spec.node_map["family_merge_0"].prompt.startswith(
-        "Prepare the maintainer handoff for target family {{ current.target }} (corpus {{ current.corpus }})."
+        "Prepare the maintainer handoff for target family libpng (corpus png)."
     )
     assert spec.node_map["merge"].depends_on == spec.fanouts["family_merge"]

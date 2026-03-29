@@ -1,9 +1,9 @@
-from agentflow import DAG, codex, fanout_group_by, fanout_matrix
+from agentflow import DAG, codex, fanout, merge
 
 
 with DAG(
     "airflow-like-fuzz-grouped-128",
-    description="Python-authored 128-shard Codex fuzz matrix with grouped reducers and scoped reducer context.",
+    description="Python-authored 128-shard Codex fuzz matrix with grouped reducers.",
     working_dir="./codex_fuzz_python_grouped_128",
     concurrency=32,
     fail_fast=True,
@@ -48,97 +48,99 @@ with DAG(
         ),
     )
 
-    fuzzer = codex(
-        task_id="fuzzer",
-        fanout=fanout_matrix(
-            {
-                "family": [
-                    {"target": "libpng", "corpus": "png"},
-                    {"target": "libjpeg", "corpus": "jpeg"},
-                    {"target": "freetype", "corpus": "fonts"},
-                    {"target": "sqlite", "corpus": "sql"},
-                ],
-                "strategy": [
-                    {"sanitizer": "asan", "focus": "parser"},
-                    {"sanitizer": "asan", "focus": "structure-aware"},
-                    {"sanitizer": "ubsan", "focus": "differential"},
-                    {"sanitizer": "ubsan", "focus": "stateful"},
-                ],
-                "seed_bucket": [
-                    {"bucket": "seed_a", "seed": 4101},
-                    {"bucket": "seed_b", "seed": 4102},
-                    {"bucket": "seed_c", "seed": 4103},
-                    {"bucket": "seed_d", "seed": 4104},
-                    {"bucket": "seed_e", "seed": 4105},
-                    {"bucket": "seed_f", "seed": 4106},
-                    {"bucket": "seed_g", "seed": 4107},
-                    {"bucket": "seed_h", "seed": 4108},
-                ],
-            },
-            as_="shard",
-            derive={
-                "label": "{{ shard.target }} / {{ shard.sanitizer }} / {{ shard.focus }} / {{ shard.bucket }}",
-                "workspace": "agents/{{ shard.target }}_{{ shard.sanitizer }}_{{ shard.bucket }}_{{ shard.suffix }}",
-            },
+    fuzzer = fanout(
+        codex(
+            task_id="fuzzer",
+            tools="read_write",
+            target={"cwd": "{{ item.workspace }}"},
+            timeout_seconds=3600,
+            retries=2,
+            prompt=(
+                "You are Codex fuzz shard {{ item.number }} of {{ item.count }} in an authorized campaign.\n\n"
+                "Campaign inputs:\n"
+                "- Target: {{ item.target }}\n"
+                "- Corpus family: {{ item.corpus }}\n"
+                "- Sanitizer: {{ item.sanitizer }}\n"
+                "- Strategy focus: {{ item.focus }}\n"
+                "- Seed bucket: {{ item.bucket }}\n"
+                "- Seed: {{ item.seed }}\n"
+                "- Label: {{ item.label }}\n"
+                "- Workspace: {{ item.workspace }}\n\n"
+                "Shard contract:\n"
+                "- Stay within {{ item.workspace }} unless you are appending to the shared crash registry or notes.\n"
+                "- Use the label, target family, sanitizer, focus, and seed bucket to keep the campaign reproducible.\n"
+                "- Prefer high-signal crashers, assertion failures, memory safety bugs, or logic corruptions.\n"
+                "- Record confirmed findings in `crashes/README.md` and copy minimal repro artifacts into `crashes/`.\n"
+                "- Add short cross-shard lessons to `docs/campaign_notes.md` when they help other shards avoid duplicate work."
+            ),
         ),
-        tools="read_write",
-        target={"cwd": "{{ shard.workspace }}"},
-        timeout_seconds=3600,
-        retries=2,
-        prompt=(
-            "You are Codex fuzz shard {{ shard.number }} of {{ shard.count }} in an authorized campaign.\n\n"
-            "Campaign inputs:\n"
-            "- Target: {{ shard.target }}\n"
-            "- Corpus family: {{ shard.corpus }}\n"
-            "- Sanitizer: {{ shard.sanitizer }}\n"
-            "- Strategy focus: {{ shard.focus }}\n"
-            "- Seed bucket: {{ shard.bucket }}\n"
-            "- Seed: {{ shard.seed }}\n"
-            "- Label: {{ shard.label }}\n"
-            "- Workspace: {{ shard.workspace }}\n\n"
-            "Shard contract:\n"
-            "- Stay within {{ shard.workspace }} unless you are appending to the shared crash registry or notes.\n"
-            "- Use the label, target family, sanitizer, focus, and seed bucket to keep the campaign reproducible.\n"
-            "- Prefer high-signal crashers, assertion failures, memory safety bugs, or logic corruptions.\n"
-            "- Record confirmed findings in `crashes/README.md` and copy minimal repro artifacts into `crashes/`.\n"
-            "- Add short cross-shard lessons to `docs/campaign_notes.md` when they help other shards avoid duplicate work."
-        ),
+        {
+            "family": [
+                {"target": "libpng", "corpus": "png"},
+                {"target": "libjpeg", "corpus": "jpeg"},
+                {"target": "freetype", "corpus": "fonts"},
+                {"target": "sqlite", "corpus": "sql"},
+            ],
+            "strategy": [
+                {"sanitizer": "asan", "focus": "parser"},
+                {"sanitizer": "asan", "focus": "structure-aware"},
+                {"sanitizer": "ubsan", "focus": "differential"},
+                {"sanitizer": "ubsan", "focus": "stateful"},
+            ],
+            "seed_bucket": [
+                {"bucket": "seed_a", "seed": 4101},
+                {"bucket": "seed_b", "seed": 4102},
+                {"bucket": "seed_c", "seed": 4103},
+                {"bucket": "seed_d", "seed": 4104},
+                {"bucket": "seed_e", "seed": 4105},
+                {"bucket": "seed_f", "seed": 4106},
+                {"bucket": "seed_g", "seed": 4107},
+                {"bucket": "seed_h", "seed": 4108},
+            ],
+        },
+        derive={
+            "label": "{{ item.target }} / {{ item.sanitizer }} / {{ item.focus }} / {{ item.bucket }}",
+            "workspace": "agents/{{ item.target }}_{{ item.sanitizer }}_{{ item.bucket }}_{{ item.suffix }}",
+        },
     )
 
-    family_merge = codex(
-        task_id="family_merge",
-        fanout=fanout_group_by("fuzzer", ["target", "corpus"], as_="family"),
-        timeout_seconds=300,
-        prompt=(
-            "Prepare the maintainer handoff for target family {{ current.target }} (corpus {{ current.corpus }}).\n\n"
-            "Campaign snapshot:\n"
-            "- Total shards: {{ fanouts.fuzzer.size }}\n"
-            "- Completed shards: {{ fanouts.fuzzer.summary.completed }}\n"
-            "- Failed shards: {{ fanouts.fuzzer.summary.failed }}\n"
-            "- Silent shards: {{ fanouts.fuzzer.summary.without_output }}\n"
-            "- Scoped reducer shards: {{ current.scope.size }}\n"
-            "- Scoped completed shards: {{ current.scope.summary.completed }}\n"
-            "- Scoped failed shards: {{ current.scope.summary.failed }}\n"
-            "- Scoped shard ids: {{ current.scope.ids | join(', ') }}\n\n"
-            "Focus only on {{ current.target }}. Summarize strong or confirmed findings first, then recurring lessons, "
-            "then quiet or failed shards that need retargeting.\n\n"
-            "{% for shard in current.scope.with_output.nodes %}\n"
-            "### {{ shard.label }} :: {{ shard.id }} (status: {{ shard.status }})\n"
-            "{{ shard.output }}\n\n"
-            "{% endfor %}"
-            "{% if current.scope.failed.size %}\n"
-            "Failed scoped shards:\n"
-            "{% for shard in current.scope.failed.nodes %}\n"
-            "- {{ shard.id }} :: {{ shard.label }}\n"
-            "{% endfor %}"
-            "{% endif %}"
-            "{% if not current.scope.with_output.size %}\n"
-            "No scoped shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.\n"
-            "{% endif %}"
+    family_merge = merge(
+        codex(
+            task_id="family_merge",
+            timeout_seconds=300,
+            prompt=(
+                "Prepare the maintainer handoff for target family {{ item.target }} (corpus {{ item.corpus }}).\n\n"
+                "Campaign snapshot:\n"
+                "- Total shards: {{ fanouts.fuzzer.size }}\n"
+                "- Completed shards: {{ fanouts.fuzzer.summary.completed }}\n"
+                "- Failed shards: {{ fanouts.fuzzer.summary.failed }}\n"
+                "- Silent shards: {{ fanouts.fuzzer.summary.without_output }}\n"
+                "- Scoped reducer shards: {{ item.scope.size }}\n"
+                "- Scoped completed shards: {{ item.scope.summary.completed }}\n"
+                "- Scoped failed shards: {{ item.scope.summary.failed }}\n"
+                "- Scoped shard ids: {{ item.scope.ids | join(', ') }}\n\n"
+                "Focus only on {{ item.target }}. Summarize strong or confirmed findings first, then recurring lessons, "
+                "then quiet or failed shards that need retargeting.\n\n"
+                "{% for shard in item.scope.with_output.nodes %}\n"
+                "### {{ shard.label }} :: {{ shard.id }} (status: {{ shard.status }})\n"
+                "{{ shard.output }}\n\n"
+                "{% endfor %}"
+                "{% if item.scope.failed.size %}\n"
+                "Failed scoped shards:\n"
+                "{% for shard in item.scope.failed.nodes %}\n"
+                "- {{ shard.id }} :: {{ shard.label }}\n"
+                "{% endfor %}"
+                "{% endif %}"
+                "{% if not item.scope.with_output.size %}\n"
+                "No scoped shard produced reducer-ready output. Say that explicitly and use the failed shard list to suggest retargeting.\n"
+                "{% endif %}"
+            ),
         ),
+        fuzzer,
+        by=["target", "corpus"],
     )
 
-    merge = codex(
+    final = codex(
         task_id="merge",
         timeout_seconds=300,
         prompt=(
@@ -165,6 +167,6 @@ with DAG(
 
     init >> fuzzer
     fuzzer >> family_merge
-    family_merge >> merge
+    family_merge >> final
 
 print(dag.to_json())
