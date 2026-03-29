@@ -44,7 +44,9 @@ def test_api_returns_default_example_payload(tmp_path):
 
     response = client.get("/api/examples/default")
     assert response.status_code == 200
-    assert "from agentflow import" in response.json()["example"]
+    payload = json.loads(response.json()["example"])
+    assert payload["name"] == "airflow-like-example"
+    assert payload["working_dir"] == "."
     assert response.json()["base_dir"] == os.getcwd()
 
 

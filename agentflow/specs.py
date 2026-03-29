@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from copy import deepcopy
 import json
 import os
@@ -86,10 +85,10 @@ _KIMI_ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
 _LOCAL_KIMI_BOOTSTRAP_SHELL_INIT = ("command -v kimi >/dev/null 2>&1", "kimi")
 _LOCAL_BOOTSTRAP_TARGET_KEYS = ("shell", "shell_login", "shell_interactive", "shell_init")
 _FANOUT_ALIAS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_FANOUT_RESERVED_CONTEXT_NAMES = {"fanout", "fanouts", "nodes", "pipeline", "current"}
+_FANOUT_RESERVED_CONTEXT_NAMES = {"fanout", "fanouts", "nodes", "pipeline"}
 _FANOUT_MEMBER_RESERVED_NAMES = {"index", "number", "count", "suffix", "value", "template_id", "node_id"}
 _FANOUT_TEMPLATE_PATTERN = re.compile(r"{{\s*(?P<expr>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}")
-_FANOUT_EXPANSION_MODE_KEYS = ("count", "values", "values_path", "matrix", "matrix_path", "group_by", "batches")
+_FANOUT_EXPANSION_MODE_KEYS = ("count", "values", "matrix", "group_by", "batches")
 _NODE_DEFAULT_FORBIDDEN_FIELDS = {
     "id",
     "prompt",
@@ -599,7 +598,7 @@ class FanoutSpec(BaseModel):
         if normalized in _FANOUT_RESERVED_CONTEXT_NAMES:
             raise ValueError(
                 "`fanout.as` uses a reserved template variable name; choose something other than "
-                "`fanout`, `fanouts`, `nodes`, `pipeline`, or `current`"
+                "`fanout`, `fanouts`, `nodes`, `pipeline`, or `item`"
             )
         if not _FANOUT_ALIAS_PATTERN.fullmatch(normalized):
             raise ValueError("`fanout.as` must be a valid template variable name")
@@ -618,7 +617,7 @@ class FanoutSpec(BaseModel):
         if selected > 1:
             raise ValueError("fanout accepts exactly one of `count`, `values`, or `matrix`")
         if (self.include is not None or self.exclude is not None) and self.matrix is None:
-            raise ValueError("`fanout.include` and `fanout.exclude` require `fanout.matrix` or `fanout.matrix_path`")
+            raise ValueError("`fanout.include` and `fanout.exclude` require `fanout.matrix`")
         if self.matrix is not None and not _curate_fanout_matrix_members(
             self.matrix,
             include=self.include,
@@ -989,40 +988,7 @@ def _render_fanout_string(template_text: str, context: dict[str, Any]) -> str:
     return _FANOUT_TEMPLATE_PATTERN.sub(_replace, template_text)
 
 
-def _resolve_fanout_manifest_path(raw_path: object, *, key: str, base_dir: Path | None) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ValueError(f"`fanout.{key}` must be a non-empty path")
-
-    path = Path(raw_path).expanduser()
-    if not path.is_absolute():
-        path = ((base_dir or Path.cwd()) / path).resolve()
-    else:
-        path = path.resolve()
-
-    if not path.exists():
-        raise ValueError(f"`fanout.{key}` path `{path}` does not exist")
-    if not path.is_file():
-        raise ValueError(f"`fanout.{key}` path `{path}` is not a file")
-    return path
-
-
-def _load_fanout_manifest_payload(path: Path) -> Any:
-    suffix = path.suffix.lower()
-    if suffix == ".csv":
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            if reader.fieldnames is None:
-                raise ValueError(f"fanout manifest `{path}` must include a CSV header row")
-            return [dict(row) for row in reader]
-
-    data = path.read_text(encoding="utf-8")
-    try:
-        return json.loads(data)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"fanout manifest `{path}` could not be parsed as JSON") from exc
-
-
-def _resolve_fanout_manifest_modes(raw_fanout: Any, *, base_dir: Path | None) -> Any:
+def _resolve_fanout_manifest_modes(raw_fanout: Any) -> Any:
     if not isinstance(raw_fanout, dict):
         return raw_fanout
 
@@ -1031,26 +997,6 @@ def _resolve_fanout_manifest_modes(raw_fanout: Any, *, base_dir: Path | None) ->
     if len(selected_modes) > 1:
         joined = ", ".join(f"`{key}`" for key in _FANOUT_EXPANSION_MODE_KEYS)
         raise ValueError(f"fanout accepts exactly one of {joined}")
-
-    values_path = updated.pop("values_path", None)
-    if values_path is not None:
-        path = _resolve_fanout_manifest_path(values_path, key="values_path", base_dir=base_dir)
-        values = _load_fanout_manifest_payload(path)
-        if not isinstance(values, list):
-            raise ValueError(
-                f"`fanout.values_path` file `{path}` must contain a JSON list or CSV rows"
-            )
-        updated["values"] = values
-
-    matrix_path = updated.pop("matrix_path", None)
-    if matrix_path is not None:
-        path = _resolve_fanout_manifest_path(matrix_path, key="matrix_path", base_dir=base_dir)
-        if path.suffix.lower() == ".csv":
-            raise ValueError("`fanout.matrix_path` does not support CSV; use JSON")
-        matrix = _load_fanout_manifest_payload(path)
-        if not isinstance(matrix, dict):
-            raise ValueError(f"`fanout.matrix_path` file `{path}` must contain a JSON object")
-        updated["matrix"] = matrix
 
     return updated
 
@@ -1137,8 +1083,6 @@ def expand_compact_nodes(payload: dict[str, Any], *, base_dir: str | Path | None
     nodes = resolved.get("nodes")
     if not isinstance(nodes, list):
         return resolved
-    resolved_base_dir = _coerce_base_dir(base_dir)
-
     source_ids = [node.get("id") for node in nodes if isinstance(node, dict) and isinstance(node.get("id"), str)]
     duplicate_source_ids = {node_id for node_id, count in Counter(source_ids).items() if count > 1}
     if duplicate_source_ids:
@@ -1164,7 +1108,7 @@ def expand_compact_nodes(payload: dict[str, Any], *, base_dir: str | Path | None
             expanded_nodes.append(dict(node))
             continue
         saw_fanout = True
-        resolved_fanout = _resolve_fanout_manifest_modes(raw_fanout, base_dir=resolved_base_dir)
+        resolved_fanout = _resolve_fanout_manifest_modes(raw_fanout)
         resolved_fanout = _resolve_fanout_source_modes(resolved_fanout, source_members=fanout_members)
         fanout = FanoutSpec.model_validate(resolved_fanout)
         rendered_nodes, member_ids = _expand_fanout_node(node, fanout)

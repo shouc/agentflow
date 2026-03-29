@@ -1,9 +1,12 @@
+"""Python DSL helpers for building AgentFlow pipelines."""
+
 from __future__ import annotations
 
 from copy import deepcopy
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 import json
+from types import TracebackType
 from typing import Any
 
 from agentflow.specs import AgentKind, LocalTarget, NodeSpec, PipelineSpec
@@ -23,6 +26,9 @@ class NodeBuilder:
 
     def __post_init__(self) -> None:
         self.dag._register(self)
+
+    def __repr__(self) -> str:
+        return f"NodeBuilder(id={json.dumps(self.id)}, agent={json.dumps(self.agent.value)})"
 
     def __rshift__(self, other: "NodeBuilder | list[NodeBuilder]") -> "NodeBuilder | list[NodeBuilder]":
         if isinstance(other, list):
@@ -44,7 +50,7 @@ class NodeBuilder:
             "id": self.id,
             "agent": self.agent,
             "prompt": self.prompt,
-            "depends_on": self.depends_on,
+            "depends_on": list(self.depends_on),
             **_normalize_node_kwargs(self.kwargs),
         }
 
@@ -64,7 +70,7 @@ class DAG:
         node_defaults: dict[str, Any] | None = None,
         agent_defaults: dict[str | AgentKind, dict[str, Any]] | None = None,
         local_target_defaults: dict[str, Any] | LocalTarget | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.description = description
         self.working_dir = working_dir
@@ -74,13 +80,21 @@ class DAG:
         self.agent_defaults = agent_defaults
         self.local_target_defaults = local_target_defaults
         self._nodes: dict[str, NodeBuilder] = {}
-        self._token = None
+        self._token: Token[DAG | None] | None = None
+
+    def __repr__(self) -> str:
+        return f"DAG(name={json.dumps(self.name)}, nodes={len(self._nodes)})"
 
     def __enter__(self) -> "DAG":
         self._token = _CURRENT_DAG.set(self)
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if self._token is not None:
             _CURRENT_DAG.reset(self._token)
 
@@ -123,9 +137,11 @@ def _normalize_local_target(value: Any) -> Any:
 
 
 def _normalize_node_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    normalized = deepcopy(kwargs)
-    if "target" in normalized:
-        normalized["target"] = _normalize_local_target(normalized.get("target"))
+    if "target" not in kwargs:
+        return deepcopy(kwargs)
+
+    normalized = deepcopy({key: value for key, value in kwargs.items() if key != "target"})
+    normalized["target"] = _normalize_local_target(kwargs["target"])
     return normalized
 
 
@@ -142,7 +158,7 @@ def _normalize_agent_defaults(
         return None
     return {
         agent: _normalize_node_kwargs(agent_defaults)
-        for agent, agent_defaults in deepcopy(defaults).items()
+        for agent, agent_defaults in defaults.items()
     }
 
 

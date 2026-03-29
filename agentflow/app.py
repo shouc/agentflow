@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import subprocess
+import sys
+from functools import lru_cache
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 
-from agentflow.defaults import load_default_pipeline
+from agentflow.defaults import bundled_template_path
 from agentflow.loader import load_pipeline_from_data, load_pipeline_from_path, load_pipeline_from_text
 from agentflow.orchestrator import Orchestrator
 from agentflow.specs import PipelineSpec
@@ -19,15 +24,44 @@ from agentflow.store import RunStore
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 
 
+@lru_cache(maxsize=1)
+def _load_default_web_example() -> str:
+    example_path = bundled_template_path("pipeline")
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    pythonpath = project_root
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath = f"{project_root}{os.pathsep}{existing_pythonpath}"
+
+    result = subprocess.run(
+        [sys.executable, str(example_path)],
+        capture_output=True,
+        text=True,
+        cwd=project_root,
+        env={**os.environ, "PYTHONPATH": pythonpath},
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"default pipeline example failed:\n{result.stderr.strip()}")
+    return result.stdout.strip()
+
+
 def _parse_pipeline_payload(payload: dict[str, Any]) -> PipelineSpec:
     try:
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+
         pipeline_path = payload.get("pipeline_path")
         if isinstance(pipeline_path, str) and pipeline_path.strip():
             return load_pipeline_from_path(pipeline_path)
 
         base_dir = payload.get("base_dir")
+        if base_dir is not None and not isinstance(base_dir, (str, os.PathLike)):
+            raise ValueError("base_dir must be a string path")
         if "pipeline_text" in payload:
-            return load_pipeline_from_text(payload["pipeline_text"], base_dir=base_dir)
+            pipeline_text = payload["pipeline_text"]
+            if not isinstance(pipeline_text, str):
+                raise ValueError("pipeline_text must be a string")
+            return load_pipeline_from_text(pipeline_text, base_dir=base_dir)
 
         pipeline_data = payload["pipeline"] if "pipeline" in payload else dict(payload)
         if isinstance(pipeline_data, dict):
@@ -35,7 +69,7 @@ def _parse_pipeline_payload(payload: dict[str, Any]) -> PipelineSpec:
             pipeline_data.pop("base_dir", None)
             pipeline_data.pop("pipeline_path", None)
         return load_pipeline_from_data(pipeline_data, base_dir=base_dir)
-    except Exception as exc:
+    except (ValueError, ValidationError, KeyError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -57,12 +91,12 @@ def create_app(*, store: RunStore | None = None, orchestrator: Orchestrator | No
     async def index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             "index.html",
-            {"request": request, "example": load_default_pipeline(), "base_dir": os.getcwd()},
+            {"request": request, "example": _load_default_web_example(), "base_dir": os.getcwd()},
         )
 
     @app.get("/api/examples/default")
     async def default_example() -> JSONResponse:
-        return JSONResponse({"example": load_default_pipeline(), "base_dir": os.getcwd()})
+        return JSONResponse({"example": _load_default_web_example(), "base_dir": os.getcwd()})
 
     @app.post("/api/runs/validate")
     async def validate_run(request: Request) -> JSONResponse:

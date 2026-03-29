@@ -5,6 +5,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from jinja2 import TemplateError
+
 from agentflow.doctor import build_bash_login_shell_bridge_recommendation
 from agentflow.local_shell import (
     target_bash_login_startup_file_statuses,
@@ -146,7 +148,7 @@ def _render_prompt_for_inspection(
 ) -> tuple[str, str | None]:
     try:
         return render_node_prompt(pipeline, node, placeholder_results), None
-    except Exception as exc:
+    except (KeyError, OSError, TemplateError, TypeError, ValueError) as exc:
         return node.prompt, str(exc)
 
 

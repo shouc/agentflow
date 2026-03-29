@@ -48,9 +48,7 @@ AgentFlow keeps the framework generic. The core fanout surface is:
 
 - `count`
 - `values`
-- `values_path`
 - `matrix`
-- `matrix_path`
 - `group_by`
 - `batches`
 - optional `derive`, plus matrix-only `include` and `exclude`

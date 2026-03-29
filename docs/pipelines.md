@@ -41,7 +41,7 @@ See `examples/airflow_like.py` for the small static DAG. `examples/airflow_like_
 Each node supports:
 
 - `agent`: `codex`, `claude`, or `kimi`
-- `fanout`: `count`, `values`, `values_path`, `matrix`, `matrix_path`, `group_by`, or `batches`, plus optional `as`, `derive`, and matrix-only `include` / `exclude`
+- `fanout`: `count`, `values`, `matrix`, `group_by`, or `batches`, plus optional `as`, `derive`, and matrix-only `include` / `exclude`
 - `schedule`: optional periodic execution for local nodes with `every_seconds`, `until_fanout_settles_from`, and optional `actuation`
 - `model`: any model string understood by the backend
 - `provider`: a string or a structured provider config with `base_url`, `api_key_env`, headers, and env

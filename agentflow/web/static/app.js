@@ -362,9 +362,9 @@ async function openRun(runId) {
 }
 
 function pipelinePayload() {
-  const yaml = document.getElementById("pipeline-input").value;
+  const pipelineText = document.getElementById("pipeline-input").value;
   const baseDir = document.getElementById("pipeline-base-dir").value.trim();
-  return baseDir ? { yaml, base_dir: baseDir } : { yaml };
+  return baseDir ? { pipeline_text: pipelineText, base_dir: baseDir } : { pipeline_text: pipelineText };
 }
 
 async function validatePipeline() {
@@ -413,7 +413,7 @@ for (const button of document.querySelectorAll(".artifact-button")) {
 
 document.getElementById("load-example").onclick = async () => {
   const data = await api("/api/examples/default");
-  document.getElementById("pipeline-input").value = data.yaml;
+  document.getElementById("pipeline-input").value = data.example;
   document.getElementById("pipeline-base-dir").value = data.base_dir || "";
   setBanner(null);
 };

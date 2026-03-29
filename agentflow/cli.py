@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import typer
+from jinja2 import TemplateError
 from pydantic import ValidationError
 from agentflow.defaults import (
     bundled_templates,
@@ -429,7 +430,7 @@ def _run_dir_for_record(store: object | None, run_id: str) -> Path | str | None:
         return None
     try:
         return run_dir(run_id)
-    except Exception:
+    except (OSError, TypeError, ValueError):
         return None
 
 
@@ -543,7 +544,7 @@ def _pipeline_launch_inspection_nodes(pipeline: object) -> list[dict[str, object
             pipeline,
             runs_dir=str((Path.cwd() / ".agentflow" / "doctor").resolve()),
         )
-    except Exception as exc:
+    except (AttributeError, OSError, RuntimeError, TemplateError, TypeError, ValueError) as exc:
         if not isinstance(pipeline, PipelineSpec) and isinstance(exc, AttributeError):
             _PIPELINE_LAUNCH_INSPECTION_ERRORS.pop(id(pipeline), None)
             return []

@@ -142,6 +142,18 @@ def test_airflow_like_dag_builds_dependencies():
     assert set(nodes["merge"].depends_on) == {"implement", "review"}
 
 
+def test_dag_and_node_repr_and_payload_isolation():
+    with DAG("demo") as dag:
+        plan = codex(task_id="plan", prompt="plan")
+
+    assert repr(plan) == 'NodeBuilder(id="plan", agent="codex")'
+    assert repr(dag) == 'DAG(name="demo", nodes=1)'
+
+    payload = plan.to_payload()
+    payload["depends_on"].append("other")
+    assert plan.depends_on == []
+
+
 def test_airflow_like_dag_applies_local_target_defaults():
     with DAG(
         "local-defaults",
@@ -369,69 +381,6 @@ def test_airflow_like_dag_can_render_json():
     assert '"working_dir": "/tmp/render-demo"' in rendered_json
     assert spec_from_json.name == "render-demo"
     assert spec_from_json.node_map["plan"].prompt == "line one\nline two"
-
-
-def test_airflow_like_dag_supports_values_path_fanout(tmp_path):
-    workspace = tmp_path / "workspace"
-    catalog_path = workspace / "catalog.csv"
-    catalog_path.parent.mkdir(parents=True)
-    catalog_path.write_text(
-        (
-            "label,target,corpus,sanitizer,focus,bucket,seed,workspace\n"
-            "libpng/asan/parser/seed_001,libpng,png,asan,parser,seed_001,4101,agents/libpng_asan_seed_001_0\n"
-            "sqlite/ubsan/stateful/seed_001,sqlite,sql,ubsan,stateful,seed_001,4101,agents/sqlite_ubsan_seed_001_1\n"
-        ),
-        encoding="utf-8",
-    )
-
-    with DAG(
-        "catalog-batched",
-        working_dir=str(workspace),
-        concurrency=4,
-        node_defaults={
-            "agent": "codex",
-            "tools": "read_only",
-        },
-        agent_defaults={
-            "codex": {
-                "model": "gpt-5-codex",
-            }
-        },
-    ) as dag:
-        init = codex(task_id="init", prompt="init", tools="read_write")
-        fuzzer = codex(
-            task_id="fuzzer",
-            prompt="fuzz {{ item.label }} inside {{ item.workspace }}",
-            fanout={"values_path": str(catalog_path), "as": "item"},
-            tools="read_write",
-            target={"cwd": "{{ item.workspace }}"},
-        )
-        batch_merge = merge(
-            codex(
-                task_id="batch_merge",
-                prompt="reduce {{ item.scope.ids | join(', ') }}",
-            ),
-            fuzzer,
-            size=1,
-        )
-        final = codex(task_id="merge", prompt="merge")
-        init >> fuzzer
-        fuzzer >> batch_merge
-        batch_merge >> final
-
-    spec = dag.to_spec()
-    nodes = spec.node_map
-
-    assert spec.fanouts == {
-        "fuzzer": ["fuzzer_0", "fuzzer_1"],
-        "batch_merge": ["batch_merge_0", "batch_merge_1"],
-    }
-    assert nodes["fuzzer_0"].prompt == "fuzz libpng/asan/parser/seed_001 inside agents/libpng_asan_seed_001_0"
-    assert nodes["fuzzer_0"].target.cwd == "agents/libpng_asan_seed_001_0"
-    assert nodes["fuzzer_1"].fanout_member["target"] == "sqlite"
-    assert nodes["batch_merge_0"].depends_on == ["fuzzer_0"]
-    assert nodes["batch_merge_0"].fanout_member["member_ids"] == ["fuzzer_0"]
-    assert nodes["merge"].depends_on == ["batch_merge_0", "batch_merge_1"]
 
 
 def test_airflow_like_fuzz_batched_example_emits_valid_pipeline():

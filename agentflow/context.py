@@ -201,7 +201,6 @@ def build_render_context(
                     )
                 scoped_nodes.append(member_context)
             current_context["scope"] = _fanout_context(scoped_nodes)
-        context["current"] = current_context
         context["item"] = current_context
     return context
 

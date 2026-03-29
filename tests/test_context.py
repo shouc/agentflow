@@ -74,12 +74,12 @@ def _batched_pipeline(tmp_path: Path):
                     "agent": "codex",
                     "depends_on": ["worker"],
                     "prompt": (
-                        "batch={{ current.number }}/{{ current.count }} "
-                        "range={{ current.start_number }}-{{ current.end_number }} "
-                        "done={{ current.scope.summary.completed }} "
-                        "failed={{ current.scope.summary.failed }} "
-                        "ids={{ current.scope.ids | join(',') }} :: "
-                        "{% for shard in current.scope.with_output.nodes %}"
+                        "batch={{ item.number }}/{{ item.count }} "
+                        "range={{ item.start_number }}-{{ item.end_number }} "
+                        "done={{ item.scope.summary.completed }} "
+                        "failed={{ item.scope.summary.failed }} "
+                        "ids={{ item.scope.ids | join(',') }} :: "
+                        "{% for shard in item.scope.with_output.nodes %}"
                         "{{ shard.node_id }}@{{ shard.workspace }}={{ shard.output }};"
                         "{% endfor %}"
                     ),
@@ -121,10 +121,10 @@ def _grouped_pipeline(tmp_path: Path):
                     "agent": "codex",
                     "depends_on": ["worker"],
                     "prompt": (
-                        "family={{ current.target }} ids={{ current.scope.ids | join(',') }} "
-                        "done={{ current.scope.summary.completed }} "
-                        "failed={{ current.scope.summary.failed }} :: "
-                        "{% for shard in current.scope.with_output.nodes %}"
+                        "family={{ item.target }} ids={{ item.scope.ids | join(',') }} "
+                        "done={{ item.scope.summary.completed }} "
+                        "failed={{ item.scope.summary.failed }} :: "
+                        "{% for shard in item.scope.with_output.nodes %}"
                         "{{ shard.node_id }}@{{ shard.seed }}={{ shard.output }};"
                         "{% endfor %}"
                     ),
@@ -193,7 +193,8 @@ def test_build_render_context_exposes_current_node_metadata_for_runtime_reducers
 
     context = build_render_context(pipeline, results, current_node=pipeline.node_map["batch_merge_0"])
 
-    current = context["current"]
+    current = context["item"]
+    assert "current" not in context
     assert current["id"] == "batch_merge_0"
     assert current["agent"] == "codex"
     assert current["depends_on"] == ["worker_0", "worker_1"]
@@ -241,7 +242,8 @@ def test_build_render_context_exposes_current_node_metadata_for_grouped_reducers
 
     context = build_render_context(pipeline, results, current_node=pipeline.node_map["family_merge_0"])
 
-    current = context["current"]
+    current = context["item"]
+    assert "current" not in context
     assert current["id"] == "family_merge_0"
     assert current["agent"] == "codex"
     assert current["depends_on"] == ["worker_0", "worker_1"]
@@ -305,12 +307,13 @@ def test_current_node_context_preserves_runtime_identity_when_member_keys_confli
     results = {"worker_0": NodeResult(node_id="worker_0")}
 
     context = build_render_context(pipeline, results, current_node=pipeline.node_map["worker_0"])
+    assert "current" not in context
 
-    assert context["current"]["id"] == "worker_0"
-    assert context["current"]["agent"] == "codex"
-    assert context["current"]["depends_on"] == []
-    assert context["current"]["target"] == "libpng"
-    assert context["current"]["value"] == {
+    assert context["item"]["id"] == "worker_0"
+    assert context["item"]["agent"] == "codex"
+    assert context["item"]["depends_on"] == []
+    assert context["item"]["target"] == "libpng"
+    assert context["item"]["value"] == {
         "id": "manifest-id",
         "agent": "manifest-agent",
         "depends_on": ["manifest-dependency"],
@@ -366,10 +369,11 @@ def test_build_render_context_exposes_artifact_paths_and_tick_metadata_for_perio
     assert context["fanouts"]["worker"]["nodes"][0]["artifacts"]["stderr_log"].endswith(
         "/run123/artifacts/worker_0/stderr.log"
     )
-    assert context["current"]["schedule"]["every_seconds"] == 600
-    assert context["current"]["schedule"]["until_fanout_settles_from"] == "worker"
-    assert context["current"]["tick_number"] == 2
-    assert context["current"]["tick_started_at"] == "2026-03-15T12:00:00+00:00"
+    assert "current" not in context
+    assert context["item"]["schedule"]["every_seconds"] == 600
+    assert context["item"]["schedule"]["until_fanout_settles_from"] == "worker"
+    assert context["item"]["tick_number"] == 2
+    assert context["item"]["tick_started_at"] == "2026-03-15T12:00:00+00:00"
 
 
 def test_render_node_prompt_can_use_artifact_paths_and_tick_metadata(tmp_path: Path):
@@ -395,7 +399,7 @@ def test_render_node_prompt_can_use_artifact_paths_and_tick_metadata(tmp_path: P
                         "until_fanout_settles_from": "worker",
                     },
                     "prompt": (
-                        "tick={{ current.tick_number }} "
+                        "tick={{ item.tick_number }} "
                         "stdout={{ fanouts.worker.nodes[0].artifacts.stdout_log }}"
                     ),
                 },

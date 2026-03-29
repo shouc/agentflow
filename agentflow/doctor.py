@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from pydantic import ValidationError
+
 from agentflow.env import merge_env_layers
 from agentflow.local_shell import (
     _bash_login_startup_has_direct_agentflow_bootstrap,
@@ -815,7 +817,7 @@ def _can_authenticate_local_codex(
             prepared,
             paths,
         )
-    except Exception:
+    except (AttributeError, TypeError, ValidationError, ValueError):
         return False, None, None
 
     env = os.environ.copy()
@@ -863,7 +865,7 @@ def _can_launch_local_codex(node: object, pipeline: object | None = None) -> tup
             prepared,
             paths,
         )
-    except Exception:
+    except (AttributeError, TypeError, ValidationError, ValueError):
         return False, executable, None
 
     env = os.environ.copy()
@@ -902,7 +904,7 @@ def _can_launch_local_claude(node: object, pipeline: object | None = None) -> tu
             prepared,
             paths,
         )
-    except Exception:
+    except (AttributeError, TypeError, ValidationError, ValueError):
         return False, executable, None
 
     env = os.environ.copy()
@@ -942,7 +944,7 @@ def _can_launch_local_kimi(node: object, pipeline: object | None = None) -> tupl
             prepared,
             paths,
         )
-    except Exception:
+    except (AttributeError, TypeError, ValidationError, ValueError):
         return False, probe_command, execution_note, None
 
     env = os.environ.copy()

@@ -397,27 +397,22 @@ async def test_orchestrator_renders_curated_fanout_matrix_context_in_merge_promp
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_renders_file_backed_fanout_values_context_in_merge_prompt(tmp_path: Path):
-    manifests = tmp_path / "manifests"
-    manifests.mkdir()
-    (manifests / "shards.json").write_text(
-        """[{"target": "libpng", "seed": 1001}, {"target": "sqlite", "seed": 2002}]
-""",
-        encoding="utf-8",
-    )
+async def test_orchestrator_renders_fanout_values_context_in_merge_prompt(tmp_path: Path):
     orchestrator = make_orchestrator(tmp_path)
     pipeline = PipelineSpec.model_validate(
         {
-            "name": "fanout-values-path",
+            "name": "fanout-values",
             "working_dir": str(tmp_path),
-            "base_dir": str(tmp_path),
             "concurrency": 2,
             "nodes": [
                 {
                     "id": "worker",
                     "fanout": {
                         "as": "shard",
-                        "values_path": "manifests/shards.json",
+                        "values": [
+                            {"target": "libpng", "seed": 1001},
+                            {"target": "sqlite", "seed": 2002},
+                        ],
                     },
                     "agent": "codex",
                     "prompt": "worker {{ shard.target }} seed {{ shard.seed }}",
@@ -609,8 +604,8 @@ async def test_orchestrator_renders_current_scope_for_batched_reducers(tmp_path:
                     "agent": "codex",
                     "depends_on": ["worker"],
                     "prompt": (
-                        "done={{ current.scope.summary.completed }}/{{ current.scope.size }} :: "
-                        "{% for shard in current.scope.with_output.nodes %}"
+                        "done={{ item.scope.summary.completed }}/{{ item.scope.size }} :: "
+                        "{% for shard in item.scope.with_output.nodes %}"
                         "{{ shard.node_id }}={{ shard.output }};"
                         "{% endfor %}"
                     ),
@@ -655,7 +650,7 @@ async def test_orchestrator_reschedules_periodic_nodes_until_watched_fanout_sett
                         "every_seconds": 1,
                         "until_fanout_settles_from": "worker",
                     },
-                    "prompt": "tick {{ current.tick_number }} running={{ fanouts.worker.summary.running }}",
+                    "prompt": "tick {{ item.tick_number }} running={{ fanouts.worker.summary.running }}",
                 },
             ],
         }

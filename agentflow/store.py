@@ -7,6 +7,8 @@ from collections import defaultdict
 from pathlib import Path
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from agentflow.specs import RunEvent, RunRecord
 from agentflow.utils import ensure_dir
 
@@ -34,7 +36,7 @@ class RunStore:
                         if line.strip()
                     ]
                     self._events_cache[run_id] = events
-            except Exception:
+            except (OSError, ValidationError, json.JSONDecodeError, KeyError):
                 continue
 
     async def create_run(self, record: RunRecord | None = None) -> RunRecord:

@@ -1,3 +1,10 @@
+"""Async pipeline orchestration for AgentFlow runs.
+
+Each submitted run is driven in a background thread that owns an asyncio loop for
+scheduling node tasks, persisting state transitions, and reacting to cancellation,
+rerun, and periodic-control signals without blocking other runs.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from agentflow.agents.registry import AdapterRegistry, default_adapter_registry
 from agentflow.context import render_node_prompt
@@ -67,6 +74,13 @@ class _PeriodicNodeRuntimeState:
 
 @dataclass(slots=True)
 class Orchestrator:
+    """Coordinate pipeline run lifecycles against the persistent run store.
+
+    The orchestrator accepts submissions, starts bounded background workers, and
+    advances each run by scheduling ready nodes until the run completes, fails, or
+    is cancelled.
+    """
+
     store: RunStore
     adapters: AdapterRegistry = default_adapter_registry
     runners: RunnerRegistry = default_runner_registry
@@ -81,6 +95,11 @@ class Orchestrator:
         self._run_slots = threading.Semaphore(self.max_concurrent_runs)
 
     async def submit(self, pipeline: PipelineSpec) -> RunRecord:
+        """Create a queued run and start its background scheduler when a slot opens.
+
+        Returns the newly created `RunRecord` with all nodes initialized as pending.
+        """
+
         run_id = self.store.new_run_id()
         run = RunRecord(
             id=run_id,
@@ -129,6 +148,12 @@ class Orchestrator:
         return await asyncio.wait_for(_poll(), timeout=timeout)
 
     async def cancel(self, run_id: str) -> RunRecord:
+        """Request cancellation for a run.
+
+        Queued runs are finalized immediately; active runs are marked cancelling and
+        observed cooperatively by the run loop and executing nodes.
+        """
+
         record = self.store.get_run(run_id)
         flag = self._cancel_flags.setdefault(run_id, threading.Event())
         flag.set()
@@ -143,6 +168,11 @@ class Orchestrator:
         return record
 
     async def rerun(self, run_id: str) -> RunRecord:
+        """Submit a fresh run using the stored pipeline from an existing run.
+
+        Returns the new queued `RunRecord`; prior run state is left unchanged.
+        """
+
         record = self.store.get_run(run_id)
         return await self.submit(record.pipeline)
 
@@ -245,7 +275,7 @@ class Orchestrator:
             return None, f"invalid JSON control envelope: {exc}"
         try:
             return _PeriodicActionEnvelope.model_validate(payload), None
-        except Exception as exc:  # pragma: no cover - pydantic error details vary
+        except ValidationError as exc:  # pragma: no cover - pydantic error details vary
             return None, f"invalid control envelope: {exc}"
 
     def _fanout_group_settled(self, pipeline: PipelineSpec, results: dict[str, NodeResult], group_id: str) -> bool:
@@ -288,6 +318,13 @@ class Orchestrator:
         remaining: set[str],
         in_progress: dict[str, asyncio.Task["_NodeExecutionOutcome"]],
     ) -> None:
+        """Apply controller actions emitted by a periodic node to its watched fanout.
+
+        Cancel actions mark running nodes for cooperative stop, while rerun actions
+        either requeue finished nodes immediately or defer rerun until in-flight work
+        reaches a terminal state.
+        """
+
         if not actions.actions:
             return
 
@@ -351,6 +388,14 @@ class Orchestrator:
         periodic_tick_number: int | None = None,
         periodic_tick_started_at: str | None = None,
     ) -> _NodeExecutionOutcome:
+        """Execute one node from prompt preparation through final persisted result.
+
+        The method renders the prompt, launches the adapter/runner pair, streams
+        traces and artifacts, evaluates success, retries with backoff when needed,
+        and honors run or node cancellation. Periodic ticks also parse optional
+        control actions and return them to the scheduler.
+        """
+
         record = self.store.get_run(run_id)
         pipeline = record.pipeline
         node = pipeline.node_map[node_id]
@@ -544,6 +589,17 @@ class Orchestrator:
         return _NodeExecutionOutcome(node_id=node_id)
 
     async def run(self, run_id: str) -> RunRecord:
+        """Drive a run until all nodes reach terminal outcomes.
+
+        The loop skips nodes blocked by upstream failure, queues nodes whose
+        dependencies are satisfied, and bounds concurrent execution with a
+        semaphore. `_execute_node()` handles per-node retry attempts; this loop
+        handles scheduling, completion collection, and explicit reruns. Periodic
+        nodes execute as repeated ticks, can emit cancel/rerun actions for a watched
+        fanout, reschedule on `every_seconds`, and finalize once that fanout group
+        has fully settled.
+        """
+
         record = self.store.get_run(run_id)
         pipeline = record.pipeline
         record.status = RunStatus.RUNNING

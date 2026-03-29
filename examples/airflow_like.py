@@ -33,4 +33,4 @@ with DAG("airflow-like-example", working_dir=".", concurrency=3) as dag:
     plan >> [implement, review]
     [implement, review] >> merge
 
-print(dag.to_spec().model_dump_json(indent=2))
+print(dag.to_json())
