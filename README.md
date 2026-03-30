@@ -40,6 +40,12 @@ print(g.to_json())
 agentflow run pipeline.py --output summary
 ```
 
+Or just ask Codex (the agentflow skill is auto-installed):
+
+```bash
+codex "Use agentflow to fan out 10 codex agents, each telling a unique joke, then merge their outputs and pick the funniest one. Write the pipeline and run it."
+```
+
 ## Parallel Fanout
 
 Fan a node into many parallel copies with `fanout()`:
