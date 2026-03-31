@@ -156,3 +156,11 @@ agentflow validate pipeline.py      # check without running
 agentflow templates                  # list starter templates
 agentflow init > pipeline.py        # scaffold a starter
 ```
+
+
+## Acknowledgements
+
+* [gepa](https://github.com/gepa-ai/gepa)
+* [kiss-ai](https://github.com/ksenxx/kiss_ai)
+* [claude-code-telegram](https://github.com/RichardAtCT/claude-code-telegram)
+* [linux.do](https://linux.do)
