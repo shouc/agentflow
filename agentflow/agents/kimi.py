@@ -7,13 +7,14 @@ from pathlib import Path
 from agentflow.agents.base import AgentAdapter
 from agentflow.env import merge_env_layers
 from agentflow.prepared import ExecutionPaths, PreparedExecution
-from agentflow.specs import NodeSpec
+from agentflow.specs import NodeSpec, RepoInstructionsMode
 
 
 class KimiAdapter(AgentAdapter):
     def prepare(self, node: NodeSpec, prompt: str, paths: ExecutionPaths) -> PreparedExecution:
         provider = self.provider_config(node.provider, node.agent)
         executable = node.executable or "kimi"
+        repo_instructions_ignored = node.repo_instructions_mode == RepoInstructionsMode.IGNORE
         command = [
             executable,
             "--print",
@@ -23,9 +24,14 @@ class KimiAdapter(AgentAdapter):
             "-p",
             prompt,
         ]
+        if repo_instructions_ignored:
+            empty_skills_dir = Path(paths.target_runtime_dir) / "empty-skills"
+            command.extend(["--add-dir", paths.target_workdir, "--skills-dir", str(empty_skills_dir)])
         if node.model:
             command.extend(["--model", node.model])
         runtime_files: dict[str, str] = {}
+        if repo_instructions_ignored:
+            runtime_files[self.relative_runtime_file("empty-skills", ".gitkeep")] = ""
         if node.mcps:
             mcp_payload: dict[str, object] = {"mcpServers": {}}
             for mcp in node.mcps:
@@ -57,10 +63,13 @@ class KimiAdapter(AgentAdapter):
                     api_key = os.getenv(provider.api_key_env)
                 if api_key is not None:
                     env.setdefault("KIMI_API_KEY", api_key)
+        cwd = paths.target_workdir
+        if repo_instructions_ignored:
+            cwd = str(Path(paths.target_runtime_dir))
         return PreparedExecution(
             command=command,
             env=env,
-            cwd=paths.target_workdir,
+            cwd=cwd,
             trace_kind="kimi",
             runtime_files=runtime_files,
         )

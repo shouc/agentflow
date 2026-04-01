@@ -46,6 +46,11 @@ class CaptureMode(StrEnum):
     TRACE = "trace"
 
 
+class RepoInstructionsMode(StrEnum):
+    INHERIT = "inherit"
+    IGNORE = "ignore"
+
+
 class PeriodicActuationMode(StrEnum):
     NONE = "none"
     OUTPUT_JSON = "output_json"
@@ -728,6 +733,7 @@ class NodeSpec(BaseModel):
     skills: list[str] = Field(default_factory=list)
     target: TargetSpec = Field(default_factory=LocalTarget)
     capture: CaptureMode = CaptureMode.FINAL
+    repo_instructions_mode: RepoInstructionsMode = RepoInstructionsMode.INHERIT
     output_key: str | None = None
     timeout_seconds: int = Field(default=1800, gt=0)
     env: dict[str, str] = Field(default_factory=dict)

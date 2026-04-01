@@ -123,6 +123,53 @@ def test_codex_adapter_uses_runtime_codex_home_for_mcp_config(tmp_path):
     assert 'command = "npx"' in prepared.runtime_files["codex_home/config.toml"]
 
 
+def test_codex_adapter_isolates_home_when_runtime_codex_home_is_used(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "plan",
+            "agent": "codex",
+            "prompt": "Plan",
+            "provider": {
+                "name": "openai-pinned",
+                "base_url": "http://example.test/v1",
+                "api_key_env": "OPENAI_API_KEY",
+                "wire_api": "responses",
+            },
+        }
+    )
+
+    prepared = CodexAdapter().prepare(node, "Plan", _paths(tmp_path))
+
+    expected_home = str(tmp_path / ".runtime" / "codex_home")
+    assert prepared.env["CODEX_HOME"] == expected_home
+    assert prepared.env["HOME"] == expected_home
+    assert prepared.runtime_files.keys() == {"codex_home/config.toml"}
+
+
+def test_codex_adapter_can_ignore_repo_instructions_with_isolated_runtime_cwd(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "plan",
+            "agent": "codex",
+            "prompt": "Plan",
+            "repo_instructions_mode": "ignore",
+        }
+    )
+
+    prepared = CodexAdapter().prepare(node, "Plan", _paths(tmp_path))
+
+    expected_home = str(tmp_path / ".runtime" / "codex_home")
+    assert prepared.env["CODEX_HOME"] == expected_home
+    assert prepared.env["HOME"] == expected_home
+    assert prepared.cwd == str(tmp_path / ".runtime")
+    assert "--disable" in prepared.command
+    disable_index = prepared.command.index("--disable")
+    assert prepared.command[disable_index + 1] == "plugins"
+    assert "--add-dir" in prepared.command
+    add_dir_index = prepared.command.index("--add-dir")
+    assert prepared.command[add_dir_index + 1] == str(tmp_path)
+
+
 def test_claude_adapter_uses_tools_flag_for_read_only_access(tmp_path):
     node = NodeSpec.model_validate(
         {
@@ -154,6 +201,25 @@ def test_claude_adapter_uses_tools_flag_for_read_write_access(tmp_path):
     index = prepared.command.index("--tools")
     assert "Bash" in prepared.command[index + 1].split(",")
     assert "Write" in prepared.command[index + 1].split(",")
+
+
+def test_claude_adapter_can_ignore_repo_instructions_with_bare_runtime_cwd(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "review",
+            "agent": "claude",
+            "prompt": "Review",
+            "repo_instructions_mode": "ignore",
+        }
+    )
+
+    prepared = ClaudeAdapter().prepare(node, "Review", _paths(tmp_path))
+
+    assert "--bare" in prepared.command
+    assert "--add-dir" in prepared.command
+    add_dir_index = prepared.command.index("--add-dir")
+    assert prepared.command[add_dir_index + 1] == str(tmp_path)
+    assert prepared.cwd == str(tmp_path / ".runtime")
 
 
 def test_claude_adapter_supports_kimi_provider_alias(tmp_path, monkeypatch):
@@ -223,6 +289,28 @@ def test_kimi_adapter_respects_custom_executable(tmp_path):
     prepared = KimiAdapter().prepare(node, "Review", _paths(tmp_path))
 
     assert prepared.command[0] == "/usr/local/bin/kimi"
+
+
+def test_kimi_adapter_can_ignore_repo_instructions_with_isolated_runtime_cwd(tmp_path):
+    node = NodeSpec.model_validate(
+        {
+            "id": "review",
+            "agent": "kimi",
+            "prompt": "Review",
+            "repo_instructions_mode": "ignore",
+        }
+    )
+
+    prepared = KimiAdapter().prepare(node, "Review", _paths(tmp_path))
+
+    assert "--add-dir" in prepared.command
+    add_dir_index = prepared.command.index("--add-dir")
+    assert prepared.command[add_dir_index + 1] == str(tmp_path)
+    assert "--skills-dir" in prepared.command
+    skills_dir_index = prepared.command.index("--skills-dir")
+    assert prepared.command[skills_dir_index + 1] == str(tmp_path / ".runtime" / "empty-skills")
+    assert prepared.cwd == str(tmp_path / ".runtime")
+    assert prepared.runtime_files.keys() == {"empty-skills/.gitkeep"}
 
 
 def test_claude_adapter_prefers_node_env_over_provider_env(tmp_path):

@@ -7,7 +7,7 @@ from pathlib import Path
 from agentflow.agents.base import AgentAdapter
 from agentflow.env import merge_env_layers
 from agentflow.prepared import ExecutionPaths, PreparedExecution
-from agentflow.specs import NodeSpec, ToolAccess
+from agentflow.specs import NodeSpec, RepoInstructionsMode, ToolAccess
 
 
 _CLAUDE_READ_ONLY_TOOLS = [
@@ -37,6 +37,7 @@ class ClaudeAdapter(AgentAdapter):
     def prepare(self, node: NodeSpec, prompt: str, paths: ExecutionPaths) -> PreparedExecution:
         provider = self.provider_config(node.provider, node.agent)
         executable = node.executable or "claude"
+        repo_instructions_ignored = node.repo_instructions_mode == RepoInstructionsMode.IGNORE
         command = [
             executable,
             "-p",
@@ -47,6 +48,8 @@ class ClaudeAdapter(AgentAdapter):
             "--permission-mode",
             "bypassPermissions",
         ]
+        if repo_instructions_ignored:
+            command.extend(["--bare", "--add-dir", paths.target_workdir])
         if node.model:
             command.extend(["--model", node.model])
         allowed_tools = _CLAUDE_READ_ONLY_TOOLS if node.tools == ToolAccess.READ_ONLY else _CLAUDE_READ_WRITE_TOOLS
@@ -87,10 +90,13 @@ class ClaudeAdapter(AgentAdapter):
                 if api_key is not None:
                     env.setdefault("ANTHROPIC_API_KEY", api_key)
         command.extend(node.extra_args)
+        cwd = paths.target_workdir
+        if repo_instructions_ignored:
+            cwd = str(Path(paths.target_runtime_dir))
         return PreparedExecution(
             command=command,
             env=env,
-            cwd=paths.target_workdir,
+            cwd=cwd,
             trace_kind="claude",
             runtime_files=runtime_files,
         )

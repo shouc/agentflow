@@ -46,6 +46,7 @@ Each node supports:
 - `model`: any model string understood by the backend
 - `provider`: a string or a structured provider config with `base_url`, `api_key_env`, headers, and env
 - `tools`: `read_only` or `read_write`
+- `repo_instructions_mode`: `inherit` (default) or `ignore` for agent CLIs that should not absorb repo-local instruction files such as `AGENTS.md`, `CLAUDE.md`, or project skills
 - `mcps`: a list of MCP server definitions
 - `skills`: a list of local skill paths or names
 - `target`: `local`, `container`, `ssh`, `ec2`, or `ecs`
@@ -216,6 +217,8 @@ With `actuation: output_json`, the node may emit a JSON envelope with an `analys
 Runtime numeric settings are validated up front: `concurrency` must be at least `1`, `timeout_seconds` must be greater than `0`, and both `retries` and `retry_backoff_seconds` must be non-negative.
 
 MCP definitions are also validated before launch: `stdio` servers require `command` and reject HTTP-only fields such as `url`, `streamable_http` servers require `url` and reject stdio-only fields such as `command`, and MCP server names must be unique within a node.
+
+`repo_instructions_mode: ignore` is a generic AgentFlow switch with agent-specific implementations. The current adapters use the same high-level pattern: start the agent from an isolated runtime directory, keep the target repo accessible via an explicit allowlist flag such as `--add-dir`, and disable or override repo-local instruction discovery where the underlying CLI supports it. When you enable this mode, write prompts that use absolute paths or explicitly tell the agent to `cd` into the repository before running shell commands.
 
 Built-in provider shorthands:
 

@@ -10,3 +10,4 @@ test-results/
 .e2e-flaky
 dist/
 *.egg-info/
+.worktrees/
