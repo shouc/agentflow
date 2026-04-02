@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agentflow.specs import TargetSkillPolicyMode
+from agentflow.skill_packages import compile_rich_skill_prelude, is_package_skill_ref
+
 
 def _candidate_paths(working_dir: Path, item: str) -> list[Path]:
     raw = Path(item).expanduser()
@@ -24,7 +27,12 @@ def _resolve_skill_path(working_dir: Path, item: str) -> Path | None:
     return None
 
 
-def compile_skill_prelude(skills: list[str], working_dir: Path) -> str:
+def compile_skill_prelude(
+    skills: list[str],
+    working_dir: Path,
+    package_roots: tuple[Path, ...] | None = None,
+    target_skill_policy: TargetSkillPolicyMode | str = TargetSkillPolicyMode.NONE,
+) -> str:
     if not skills:
         return ""
     sections: list[str] = []
@@ -32,6 +40,16 @@ def compile_skill_prelude(skills: list[str], working_dir: Path) -> str:
     for item in skills:
         found = _resolve_skill_path(working_dir, item)
         if found is None:
+            if is_package_skill_ref(item):
+                rich = compile_rich_skill_prelude(
+                    [item],
+                    repo_root=working_dir,
+                    package_roots=package_roots,
+                    target_skill_policy=target_skill_policy,
+                )
+                if rich:
+                    sections.append(rich)
+                    continue
             unresolved.append(item)
             continue
         sections.append(f"Skill `{item}` from {found}:\n{found.read_text(encoding='utf-8').strip()}")

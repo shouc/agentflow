@@ -51,6 +51,11 @@ class RepoInstructionsMode(StrEnum):
     IGNORE = "ignore"
 
 
+class TargetSkillPolicyMode(StrEnum):
+    NONE = "none"
+    INHERIT_ALL = "inherit_all"
+
+
 class PeriodicActuationMode(StrEnum):
     NONE = "none"
     OUTPUT_JSON = "output_json"
@@ -734,6 +739,7 @@ class NodeSpec(BaseModel):
     target: TargetSpec = Field(default_factory=LocalTarget)
     capture: CaptureMode = CaptureMode.FINAL
     repo_instructions_mode: RepoInstructionsMode = RepoInstructionsMode.INHERIT
+    target_skill_policy: TargetSkillPolicyMode = TargetSkillPolicyMode.NONE
     output_key: str | None = None
     timeout_seconds: int = Field(default=1800, gt=0)
     env: dict[str, str] = Field(default_factory=dict)
