@@ -1,5 +1,5 @@
 import React, { useMemo, useEffect } from 'react';
-import { ReactFlow, Background, Controls, MarkerType, ReactFlowProvider, useReactFlow } from '@xyflow/react';
+import { ReactFlow, Background, Controls, MarkerType, ReactFlowProvider, useReactFlow, Position } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { Run } from './api';
@@ -72,7 +72,9 @@ const GraphContent: React.FC<GraphViewProps> = ({ run, onSelectNode, sidebarWidt
 
       return {
         id: n.id,
-        position: { x: level * 250 + 50, y: count * 150 + 50 },
+        position: { x: level * 280 + 50, y: count * 140 + 50 },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
         data: { 
           label: (
             <div className="flex flex-col gap-1 items-start text-left p-1 w-40 overflow-hidden text-sm">
@@ -95,22 +97,30 @@ const GraphContent: React.FC<GraphViewProps> = ({ run, onSelectNode, sidebarWidt
 
   const edges: Edge[] = useMemo(() => {
     if (!run?.pipeline?.nodes) return [];
-    const newEdges: Edge[] = [];
+    
+    const edgeMap = new Map<string, Edge>();
+    
     run.pipeline.nodes.forEach(n => {
       if (n.depends_on) {
         n.depends_on.forEach(depId => {
-          newEdges.push({
-            id: `e-${depId}-${n.id}`,
-            source: depId,
-            target: n.id,
-            markerEnd: { type: MarkerType.ArrowClosed },
-            style: { stroke: '#94a3b8', strokeWidth: 1.5 },
-          });
+          const edgeId = `e-${depId}-${n.id}`;
+          if (!edgeMap.has(edgeId)) {
+            edgeMap.set(edgeId, {
+              id: edgeId,
+              source: depId,
+              target: n.id,
+              type: 'smoothstep',
+              markerEnd: { type: MarkerType.ArrowClosed },
+              style: { stroke: '#94a3b8', strokeWidth: 1.5 },
+            });
+          }
         });
       }
     });
-    return newEdges;
+    
+    return Array.from(edgeMap.values());
   }, [run]);
+
 
   // Automatically fit view when container dimensions change or new nodes are added
   useEffect(() => {

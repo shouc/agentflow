@@ -4,8 +4,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { NodeState } from './api';
-import { Terminal, Brain, FileText, AlertCircle, ChevronDown, Copy, Zap, CheckCircle, PlayCircle, Hash, Clock, Search, RefreshCw, Database } from 'lucide-react';
+import { Terminal, Brain, FileText, AlertCircle, ChevronDown, Copy, Zap, CheckCircle, PlayCircle, Hash, Clock, RefreshCw, Database, Activity } from 'lucide-react';
 import { fetchArtifactContent } from './api';
+import { Scratchboard } from './Scratchboard';
 
 interface NodeDetailProps {
   runId: string | null;
@@ -14,8 +15,8 @@ interface NodeDetailProps {
   agentKind?: string;
 }
 
-export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agentKind }) => {
-  const [activeTab, setActiveTab ] = useState<'output' | 'thinking' | 'stdout' | 'stderr' | 'config'>('output');
+export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState }) => {
+  const [activeTab, setActiveTab ] = useState<'output' | 'thinking' | 'stdout' | 'stderr' | 'scratchboard' | 'config'>('output');
   const [showRawTrace, setShowRawTrace] = useState(false);
   const [configContent, setConfigContent] = useState<string | null>(null);
   const [configLoading, setConfigLoading] = useState(false);
@@ -271,31 +272,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
     }
   };
 
-  // Find the session ID from trace events
-  // We scan all events for "session_id" (Claude/Kimi) or "thread_id" (Codex)
-  // We are looking for any string that looks like a UUID (long-enough string)
-  let foundSessionId = null;
-  if (nodeState?.trace_events) {
-    for (const e of nodeState.trace_events) {
-      const sid = e.raw?.session_id || e.raw?.thread_id || e.raw?.id;
-      if (sid && typeof sid === 'string' && sid.length > 20) {
-        foundSessionId = sid;
-        break;
-      }
-    }
-  }
   
-  const isAgent = ['codex', 'claude', 'kimi'].includes(agentKind || '');
-  const showResume = isAgent && !!foundSessionId;
-  const sessionIdDisplay = foundSessionId || nodeState?.node_id || nodeId || 'n/a';
-  
-  const resumeCommand = agentKind === 'codex' 
-    ? `codex -- --resume ${foundSessionId}` 
-    : `${agentKind || 'claude'} --resume ${foundSessionId}`;
-
-  const copyToClipboard = () => {
-    if (foundSessionId) navigator.clipboard.writeText(resumeCommand);
-  };
 
   return (
     <div className="w-full bg-white border-l border-slate-200 h-full flex flex-col shrink-0 overflow-hidden relative shadow-2xl z-20">
@@ -319,23 +296,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
         <div className="flex flex-col gap-2.5">
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider">
             <span className="flex items-center gap-1"><Clock size={10} /> Attempt {nodeState?.current_attempt || 0}</span>
-            {showResume && <span className="font-mono text-slate-300 flex items-center gap-1"><Search size={10} /> {sessionIdDisplay.slice(0, 8)}...</span>}
           </div>
-          
-          {showResume && (
-            <div className="flex items-center bg-slate-950 rounded-lg border border-slate-800 pl-3 pr-1 py-1 group transition-all hover:border-slate-700 shadow-xl overflow-hidden">
-              <code className="text-[10px] font-mono text-emerald-400 truncate flex-1 pr-2 tracking-tight">
-                {resumeCommand}
-              </code>
-              <button 
-                onClick={copyToClipboard}
-                title="Copy Command"
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-md transition-all active:scale-95"
-              >
-                <Copy size={12} />
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -345,6 +306,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
           { id: 'thinking', icon: <Brain size={13} />, label: 'Thinking' },
           { id: 'stdout', icon: <Terminal size={13} />, label: 'Stdout' },
           { id: 'stderr', icon: <AlertCircle size={13} />, label: 'Stderr' },
+          { id: 'scratchboard', icon: <Activity size={13} />, label: 'Scratchboard' },
           { id: 'config', icon: <Hash size={13} />, label: 'Config' },
         ].map(tab => (
           <button
@@ -417,6 +379,12 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
                 )
               )}
             </div>
+          )}
+
+          {activeTab === 'scratchboard' && (
+             <div className="py-2">
+                <Scratchboard runId={runId} />
+             </div>
           )}
 
           {activeTab === 'config' && (

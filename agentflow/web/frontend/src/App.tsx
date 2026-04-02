@@ -3,9 +3,8 @@ import type { Run, Health } from './api';
 import { fetchRuns, fetchRun, cancelRun, rerunRun, fetchHealth } from './api';
 import { Sidebar } from './Sidebar';
 import { GraphView } from './GraphView';
-import { Billboard } from './Billboard';
 import { NodeDetail } from './NodeDetail';
-import { RefreshCw, Cpu, Database, Activity, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, Cpu, Database, Activity, Clock } from 'lucide-react';
 
 function App() {
   const [runs, setRuns] = useState<Run[]>([]);
@@ -14,7 +13,6 @@ function App() {
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isBillboardOpen, setIsBillboardOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem('sidebarWidth');
     return saved ? parseInt(saved, 10) : 320;
@@ -223,51 +221,29 @@ function App() {
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <GraphView 
-            run={activeRun} 
-            onSelectNode={setSelectedNodeId} 
-            sidebarWidth={sidebarWidth}
-            rightPanelWidth={rightPanelWidth}
-          />
+           <GraphView 
+             run={activeRun} 
+             onSelectNode={setSelectedNodeId} 
+             sidebarWidth={sidebarWidth}
+             rightPanelWidth={rightPanelWidth}
+           />
         </div>
 
-        {/* Persistent Billboard Toggle Handle (Visible when closed) */}
-        {!isBillboardOpen && (
-          <button 
-             onClick={() => setIsBillboardOpen(true)}
-             className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-40 bg-blue-600 hover:bg-blue-500 border border-blue-400 border-r-0 rounded-l-2xl flex flex-col items-center justify-center gap-4 transition-all z-[60] shadow-[0_0_20px_rgba(37,99,235,0.3)] group hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] active:scale-95"
-          >
-             <ChevronLeft size={16} className="text-white group-hover:scale-110 transition-transform" />
-             <span className="[writing-mode:vertical-lr] text-[10px] font-black tracking-[0.3em] uppercase text-white drop-shadow-sm">Billboard</span>
-          </button>
-        )}
 
         {/* Right Resizer Handle */}
         <div 
           onMouseDown={startResizingRight}
-          className={`w-1.5 h-full bg-slate-100 hover:bg-blue-400 cursor-col-resize transition-colors flex items-center justify-center group shrink-0 ${(isBillboardOpen || selectedNodeId) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          className={`w-1.5 h-full bg-slate-100 hover:bg-blue-400 cursor-col-resize transition-colors flex items-center justify-center group shrink-0 ${selectedNodeId ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         >
           <div className="w-px h-8 bg-slate-300 group-hover:bg-blue-300" />
         </div>
 
         {/* Unified Right Panel (Resizable) */}
         <div 
-          className={`h-full bg-white border-l border-slate-200 shadow-2xl relative transition-all overflow-hidden shrink-0 ${(isBillboardOpen || selectedNodeId) ? '' : 'w-0 overflow-hidden border-none'}`}
-          style={(isBillboardOpen || selectedNodeId) ? { width: rightPanelWidth } : {}}
+          className={`h-full bg-white border-l border-slate-200 shadow-2xl relative transition-all overflow-hidden shrink-0 ${selectedNodeId ? '' : 'w-0 overflow-hidden border-none'}`}
+          style={selectedNodeId ? { width: rightPanelWidth } : {}}
         >
-          {/* Billboard View */}
-          <div className={`absolute inset-0 transition-opacity duration-300 ${isBillboardOpen && !selectedNodeId ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-             <button 
-               onClick={() => setIsBillboardOpen(false)}
-               title="Close Sidebar"
-               className="absolute -left-4 top-1/2 -translate-y-1/2 w-4 h-14 bg-white border border-slate-200 shadow-lg rounded-l-xl flex items-center justify-center hover:bg-slate-50 transition-all z-[60] group cursor-pointer active:scale-95"
-             >
-               <ChevronRight size={14} className="text-slate-400" />
-             </button>
-             <Billboard runId={activeRunId} />
-          </div>
-
-          {/* Node Detail View (takes precedence if selected) */}
+          {/* Node Detail View */}
           <div className={`absolute inset-0 transition-opacity duration-300 ${selectedNodeId ? 'opacity-100 z-20' : 'opacity-0 z-0 pointer-events-none'}`}>
             <NodeDetail 
                runId={activeRunId}

@@ -46,7 +46,7 @@ export const fetchRun = async (id: string): Promise<Run> => {
 };
 
 export const fetchScratchboard = async (runId: string): Promise<string> => {
-  const res = await fetch(`/api/runs/${runId}/scratchboard`);
+  const res = await fetch(`/api/runs/${runId}/scratchboard?t=${Date.now()}`);
   if (!res.ok) throw new Error('Failed to fetch scratchboard');
   return res.text();
 };

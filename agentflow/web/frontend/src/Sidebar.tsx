@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Search, Clock, Zap, Layers, Calendar, Activity, CheckCircle, XCircle } from 'lucide-react';
 import type { Run } from './api';
 
@@ -10,6 +10,8 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ runs, activeRunId, onSelectRun, onRefresh }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+
   const formatRelativeTime = (dateStr?: string) => {
     if (!dateStr) return '-';
     const date = new Date(dateStr);
@@ -75,14 +77,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ runs, activeRunId, onSelectRun
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
           <input
             type="text"
-            placeholder="Search runs..."
+            placeholder="Search runs (id, name, status)..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
           />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5 custom-scrollbar">
-        {runs.map((run) => (
+        {runs.filter(run => {
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          const nameStr = (run.pipeline?.name || 'Untitled Pipeline').toLowerCase();
+          const idStr = run.id.toLowerCase();
+          const statusStr = run.status.toLowerCase();
+          return nameStr.includes(q) || idStr.includes(q) || statusStr.includes(q);
+        }).map((run) => (
           <button
             key={run.id}
             onClick={() => onSelectRun(run.id)}
@@ -133,7 +144,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ runs, activeRunId, onSelectRun
             </div>
           </button>
         ))}
-        {runs.length === 0 && (
+        {runs.filter(run => {
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          return (run.pipeline?.name || 'Untitled Pipeline').toLowerCase().includes(q) || run.id.toLowerCase().includes(q) || run.status.toLowerCase().includes(q);
+        }).length === 0 && (
           <div className="p-8 text-center">
             <Activity className="w-8 h-8 text-slate-200 mx-auto mb-2" />
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">No runs found</p>
