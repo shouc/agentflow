@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { Run, Health } from './api';
 import { fetchRuns, fetchRun, cancelRun, rerunRun, fetchHealth } from './api';
 import { Sidebar } from './Sidebar';
@@ -15,6 +15,59 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isBillboardOpen, setIsBillboardOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('sidebarWidth');
+    return saved ? parseInt(saved, 10) : 320;
+  });
+  const [rightPanelWidth, setRightPanelWidth] = useState(() => {
+    const saved = localStorage.getItem('rightPanelWidth');
+    return saved ? parseInt(saved, 10) : 400;
+  });
+  const isResizingLeft = useRef(false);
+  const isResizingRight = useRef(false);
+
+  const startResizingLeft = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingLeft.current = true;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  const startResizingRight = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRight.current = true;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    isResizingLeft.current = false;
+    isResizingRight.current = false;
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'default';
+    document.body.style.userSelect = 'auto';
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isResizingLeft.current) {
+      const newWidth = e.clientX;
+      if (newWidth > 200 && newWidth < 800) {
+        setSidebarWidth(newWidth);
+        localStorage.setItem('sidebarWidth', newWidth.toString());
+      }
+    } else if (isResizingRight.current) {
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth > 300 && newWidth < 900) {
+        setRightPanelWidth(newWidth);
+        localStorage.setItem('rightPanelWidth', newWidth.toString());
+      }
+    }
+  }, []);
 
   const refreshRuns = useCallback(async () => {
      setLoading(true);
@@ -22,27 +75,21 @@ function App() {
        const [data, healthData] = await Promise.all([fetchRuns(), fetchHealth()]);
        setRuns(data.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()));
        setHealth(healthData);
-       if (data.length > 0 && !activeRunId) {
-         setActiveRunId(data[0].id);
-       }
      } catch (err) {
        console.error("Failed to fetch data:", err);
      } finally {
        setLoading(false);
      }
-  }, [activeRunId]);
+  }, []);
 
   const loadRun = useCallback(async (id: string) => {
      try {
        const run = await fetchRun(id);
        setActiveRun(run);
-       if (!selectedNodeId && run.pipeline?.nodes?.length) {
-         setSelectedNodeId(run.pipeline.nodes[0].id);
-       }
      } catch (err) {
        console.error("Failed to load run details:", err);
      }
-  }, [selectedNodeId]);
+  }, []);
 
   const handleCancel = async () => {
     if (!activeRunId) return;
@@ -65,6 +112,20 @@ function App() {
     }
   };
 
+  // Initial run selection
+  useEffect(() => {
+    if (runs.length > 0 && !activeRunId) {
+      setActiveRunId(runs[0].id);
+    }
+  }, [runs, activeRunId]);
+
+  // Initial node selection when a run is loaded
+  useEffect(() => {
+    if (activeRun?.pipeline?.nodes?.length && !selectedNodeId) {
+      setSelectedNodeId(activeRun.pipeline.nodes[0].id);
+    }
+  }, [activeRun, selectedNodeId]);
+
   useEffect(() => {
     refreshRuns(); // Initial fetch
     
@@ -85,7 +146,7 @@ function App() {
   useEffect(() => {
     if (activeRunId) {
       loadRun(activeRunId);
-      const timer = setInterval(() => loadRun(activeRunId), 3000);
+      const timer = setInterval(() => loadRun(activeRunId), 1000);
       return () => clearInterval(timer);
     }
   }, [activeRunId, loadRun]);
@@ -113,7 +174,7 @@ function App() {
              QUEUED: {health?.runs.queued || 0}
            </div>
            <div className="flex items-center gap-2.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
-             <Activity className={`w-3.5 h-3.5 text-emerald-400 ${(health?.runs.running || 0) > 0 ? 'animate-pulse' : ''}`} />
+             <Activity className="w-3.5 h-3.5 text-emerald-400" />
              RUNNING: {health?.runs.running || 0}
            </div>
 
@@ -144,16 +205,29 @@ function App() {
 
       {/* Main Content Area */}
       <main className="flex flex-1 overflow-hidden bg-white relative">
-        <Sidebar 
-           runs={runs} 
-           activeRunId={activeRunId} 
-           onSelectRun={(id) => { setActiveRunId(id); setSelectedNodeId(null); }} 
-           onRefresh={refreshRuns} 
-        />
-        <div className="flex-1 flex flex-col min-w-0 border-x border-slate-200">
+        <div style={{ width: sidebarWidth }} className="shrink-0 flex flex-col h-full overflow-hidden">
+          <Sidebar 
+             runs={runs} 
+             activeRunId={activeRunId} 
+             onSelectRun={(id) => { setActiveRunId(id); setSelectedNodeId(null); }} 
+             onRefresh={refreshRuns} 
+          />
+        </div>
+
+        {/* Left Resizer Handle */}
+        <div 
+          onMouseDown={startResizingLeft}
+          className="w-1.5 h-full bg-slate-100 hover:bg-blue-400 cursor-col-resize transition-colors flex items-center justify-center group shrink-0"
+        >
+          <div className="w-px h-8 bg-slate-300 group-hover:bg-blue-300" />
+        </div>
+
+        <div className="flex-1 flex flex-col min-w-0">
           <GraphView 
             run={activeRun} 
             onSelectNode={setSelectedNodeId} 
+            sidebarWidth={sidebarWidth}
+            rightPanelWidth={rightPanelWidth}
           />
         </div>
 
@@ -161,16 +235,28 @@ function App() {
         {!isBillboardOpen && (
           <button 
              onClick={() => setIsBillboardOpen(true)}
-             className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-40 bg-blue-600 hover:bg-blue-500 border border-blue-400 border-r-0 rounded-l-2xl flex flex-col items-center justify-center gap-4 transition-all z-[60] shadow-[0_0_20px_rgba(37,99,235,0.3)] group hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] active:scale-95 animate-in slide-in-from-right-2"
+             className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-40 bg-blue-600 hover:bg-blue-500 border border-blue-400 border-r-0 rounded-l-2xl flex flex-col items-center justify-center gap-4 transition-all z-[60] shadow-[0_0_20px_rgba(37,99,235,0.3)] group hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] active:scale-95"
           >
              <ChevronLeft size={16} className="text-white group-hover:scale-110 transition-transform" />
              <span className="[writing-mode:vertical-lr] text-[10px] font-black tracking-[0.3em] uppercase text-white drop-shadow-sm">Billboard</span>
           </button>
         )}
 
-        {/* Collapsible Billboard Drawer */}
-        <div className={`flex shrink-0 transition-all duration-300 ease-in-out relative ${isBillboardOpen ? 'w-96 border-l border-slate-200 shadow-2xl' : 'w-0 overflow-hidden'}`}>
-           {isBillboardOpen && (
+        {/* Right Resizer Handle */}
+        <div 
+          onMouseDown={startResizingRight}
+          className={`w-1.5 h-full bg-slate-100 hover:bg-blue-400 cursor-col-resize transition-colors flex items-center justify-center group shrink-0 ${(isBillboardOpen || selectedNodeId) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        >
+          <div className="w-px h-8 bg-slate-300 group-hover:bg-blue-300" />
+        </div>
+
+        {/* Unified Right Panel (Resizable) */}
+        <div 
+          className={`h-full bg-white border-l border-slate-200 shadow-2xl relative transition-all overflow-hidden shrink-0 ${(isBillboardOpen || selectedNodeId) ? '' : 'w-0 overflow-hidden border-none'}`}
+          style={(isBillboardOpen || selectedNodeId) ? { width: rightPanelWidth } : {}}
+        >
+          {/* Billboard View */}
+          <div className={`absolute inset-0 transition-opacity duration-300 ${isBillboardOpen && !selectedNodeId ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
              <button 
                onClick={() => setIsBillboardOpen(false)}
                title="Close Sidebar"
@@ -178,18 +264,19 @@ function App() {
              >
                <ChevronRight size={14} className="text-slate-400" />
              </button>
-           )}
-           <div className="w-96 h-full flex flex-col bg-white">
              <Billboard runId={activeRunId} />
-           </div>
-        </div>
+          </div>
 
-        <NodeDetail 
-           runId={activeRunId}
-           nodeId={selectedNodeId} 
-           nodeState={activeRun?.nodes?.[selectedNodeId || ''] || null} 
-           agentKind={activeRun?.pipeline?.nodes?.find(n => n.id === selectedNodeId)?.agent || activeRun?.pipeline?.nodes?.find(n => n.id === selectedNodeId)?.kind}
-        />
+          {/* Node Detail View (takes precedence if selected) */}
+          <div className={`absolute inset-0 transition-opacity duration-300 ${selectedNodeId ? 'opacity-100 z-20' : 'opacity-0 z-0 pointer-events-none'}`}>
+            <NodeDetail 
+               runId={activeRunId}
+               nodeId={selectedNodeId} 
+               nodeState={activeRun?.nodes?.[selectedNodeId || ''] || null} 
+               agentKind={activeRun?.pipeline?.nodes?.find(n => n.id === selectedNodeId)?.agent || activeRun?.pipeline?.nodes?.find(n => n.id === selectedNodeId)?.kind}
+            />
+          </div>
+        </div>
       </main>
     </div>
   );

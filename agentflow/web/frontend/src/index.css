@@ -49,3 +49,23 @@ body {
 .prose tr:nth-child(even) {
   background-color: #f6f8fa;
 }
+
+/* Resizer Handle Styles */
+.cursor-col-resize {
+  transition: background-color 0.2s ease, width 0.2s ease;
+  z-index: 50;
+}
+
+.cursor-col-resize:hover {
+  background-color: var(--color-accent-fg);
+  box-shadow: 0 0 10px rgba(9, 105, 218, 0.3);
+}
+
+.cursor-col-resize div {
+  transition: transform 0.2s ease;
+}
+
+.cursor-col-resize:hover div {
+  transform: scaleY(1.5);
+  background-color: white;
+}

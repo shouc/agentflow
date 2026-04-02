@@ -24,18 +24,54 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
   const [logs, setLogs] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
 
+  // Auto-tab selection logic based on output and status
+  const lastNodeId = useRef<string | null>(null);
+  const lastStatus = useRef(nodeState?.status);
+
+  useEffect(() => {
+    if (!nodeId) return;
+
+    const isNodeChanged = lastNodeId.current !== nodeId;
+    const isTerminal = ['completed', 'failed', 'cancelled'].includes(nodeState?.status || '');
+    
+    // Initial selection ONLY when clicking a NEW node
+    if (isNodeChanged) {
+      if (nodeState?.output) {
+        setActiveTab('output');
+      } else if (!isTerminal || nodeState?.status === 'running' || nodeState?.status === 'retrying') {
+        setActiveTab('stdout');
+      }
+      lastNodeId.current = nodeId;
+    }
+
+    // Auto-switch from stdout/stderr to output when node FINISHES
+    const transitionedToFinished = 
+      !['completed', 'failed', 'cancelled'].includes(lastStatus.current || '') && 
+      isTerminal;
+
+    if (transitionedToFinished && (activeTab === 'stdout' || activeTab === 'stderr') && nodeState?.output) {
+      setActiveTab('output');
+    }
+
+    lastStatus.current = nodeState?.status;
+  }, [nodeId, nodeState?.status, !!nodeState?.output]);
+
   // Auto-scroll to bottom logic
   useEffect(() => {
-    if (autoScroll && scrollRef.current && activeTab === 'output') {
+    if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [nodeState?.output, activeTab, autoScroll]);
+  }, [nodeState?.output, nodeState?.trace_events, logs, activeTab, autoScroll]);
 
-  // Fetch stdout/stderr/config logs
+  // Fetch stdout/stderr/config logs with auto-refresh for active nodes
   useEffect(() => {
-    if ((activeTab === 'stdout' || activeTab === 'stderr') && runId && nodeId) {
-      const fetchLogs = async () => {
-        setLogsLoading(true);
+    if (!runId || !nodeId) return;
+
+    const isTerminal = ['completed', 'failed', 'cancelled'].includes(nodeState?.status || '');
+    
+    const fetchLogs = async () => {
+      if (activeTab === 'stdout' || activeTab === 'stderr') {
+        if (!logs) setLogsLoading(true);
         try {
           const fileName = activeTab === 'stdout' ? 'stdout.log' : 'stderr.log';
           const content = await fetchArtifactContent(runId, nodeId, fileName);
@@ -45,11 +81,8 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
         } finally {
           setLogsLoading(false);
         }
-      };
-      fetchLogs();
-    } else if (activeTab === 'config' && runId && nodeId) {
-      const fetchConfig = async () => {
-        setConfigLoading(true);
+      } else if (activeTab === 'config') {
+        if (!configContent) setConfigLoading(true);
         try {
           const content = await fetchArtifactContent(runId, nodeId, 'launch.json');
           setConfigContent(content);
@@ -58,16 +91,22 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
         } finally {
           setConfigLoading(false);
         }
-      };
-      fetchConfig();
-    } else {
-      setLogs(null);
+      } else {
+        setLogs(null);
+      }
+    };
+
+    fetchLogs();
+    
+    if (!isTerminal && (activeTab === 'stdout' || activeTab === 'stderr')) {
+      const timer = setInterval(fetchLogs, 1000);
+      return () => clearInterval(timer);
     }
-  }, [activeTab, runId, nodeId]);
+  }, [activeTab, runId, nodeId, nodeState?.status]);
 
   if (!nodeId) {
     return (
-      <div className="w-96 bg-white border-l border-slate-200 h-full flex flex-col p-8 text-center justify-center text-slate-400">
+      <div className="w-full bg-white border-l border-slate-200 h-full flex flex-col p-8 text-center justify-center text-slate-400">
         <p>Select a node to see details</p>
       </div>
     );
@@ -113,12 +152,12 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
     const commandText = rawData?.command || rawData?.cmd || rawData?.item?.command || rawData?.item?.cmd || (typeof rawData?.args === 'string' ? rawData.args : null);
 
     return (
-      <div key={index} className="relative pl-6 pb-6 last:pb-2 group animate-in fade-in slide-in-from-left-2 duration-300">
+      <div key={index} className="relative pl-6 pb-6 last:pb-2 group">
         {/* Timeline connector */}
         <div className="absolute left-[11px] top-4 bottom-0 w-px bg-slate-200 group-last:bg-transparent" />
         
         {/* Event Icon/Marker */}
-        <div className={`absolute left-0 top-1 w-6 h-6 rounded-full ${style.bg} ${style.color} flex items-center justify-center ring-4 ring-white z-10 shadow-sm border border-slate-100 transition-transform group-hover:scale-110`}>
+        <div className={`absolute left-0 top-1 w-6 h-6 rounded-full ${style.bg} ${style.color} flex items-center justify-center ring-4 ring-white z-10 shadow-sm border border-slate-100`}>
           {style.icon}
         </div>
 
@@ -181,7 +220,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
     
     const lines = content.split('\n').filter(l => l.trim());
     return (
-      <div className="space-y-3 font-mono text-[11px] animate-in fade-in duration-300">
+      <div className="space-y-3 font-mono text-[11px]">
         {lines.map((line, i) => {
           let parsed: any = null;
           // Try to find JSON in the line (sometimes logs have prefixes)
@@ -226,8 +265,10 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    const isAtBottom = Math.abs(target.scrollHeight - target.clientHeight - target.scrollTop) < 10;
-    setAutoScroll(isAtBottom);
+    const isAtBottom = Math.abs(target.scrollHeight - target.clientHeight - target.scrollTop) < 20;
+    if (autoScroll !== isAtBottom) {
+      setAutoScroll(isAtBottom);
+    }
   };
 
   // Find the session ID from trace events
@@ -257,7 +298,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
   };
 
   return (
-    <div className="w-96 bg-white border-l border-slate-200 h-full flex flex-col shrink-0 overflow-hidden relative shadow-2xl z-20">
+    <div className="w-full bg-white border-l border-slate-200 h-full flex flex-col shrink-0 overflow-hidden relative shadow-2xl z-20">
       <div className="p-4 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-30">
         <div className="flex items-center justify-between mb-2">
            <h2 className="font-bold text-slate-900 text-base truncate flex items-center gap-2">
@@ -267,12 +308,12 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
            <span className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase shadow-sm border ${
              nodeState?.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' :
              nodeState?.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-             nodeState?.status === 'running' ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse' :
-             nodeState?.status === 'cancelling' ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' :
+             nodeState?.status === 'running' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+             nodeState?.status === 'cancelling' ? 'bg-amber-50 text-amber-700 border-amber-200' :
              nodeState?.status === 'cancelled' ? 'bg-slate-100 text-slate-500 border-slate-300' :
              'bg-slate-50 text-slate-600 border-slate-200'
            }`}>
-             {nodeState?.status || 'pending'}
+             {nodeState?.status || 'waiting'}
            </span>
         </div>
         <div className="flex flex-col gap-2.5">
@@ -323,12 +364,12 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
 
       <div 
         ref={scrollRef}
-        onScroll={activeTab === 'output' ? handleScroll : undefined}
-        className="flex-1 overflow-y-auto custom-scrollbar bg-white/40"
+        onScroll={['output', 'thinking', 'stdout', 'stderr'].includes(activeTab) ? handleScroll : undefined}
+        className="flex-1 overflow-y-auto custom-scrollbar bg-white/40 relative"
       >
-        <div className="p-4">
+        <div className="p-4 min-h-full">
           {activeTab === 'output' && (
-            <div className="prose prose-sm prose-slate max-w-none relative animate-in fade-in duration-300">
+            <div className="prose prose-sm prose-slate max-w-none relative">
               {nodeState?.output ? (
                  <ReactMarkdown 
                    remarkPlugins={[remarkGfm]} 
@@ -348,7 +389,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
           )}
 
           {activeTab === 'thinking' && (
-            <div className="space-y-0 animate-in slide-in-from-right-4 duration-300">
+            <div className="space-y-0">
               <div className="flex justify-between items-center mb-4 px-1">
                  <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Timeline</h3>
                  <button 
@@ -379,7 +420,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
           )}
 
           {activeTab === 'config' && (
-             <div className="animate-in slide-in-from-right-4 duration-300">
+             <div className="">
                 <div className="flex items-center gap-2 mb-4 text-slate-400 px-1">
                   <Hash size={12} className="text-blue-500" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Configuration (launch.json)</span>
@@ -398,7 +439,7 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
           )}
 
           {(activeTab === 'stdout' || activeTab === 'stderr') && (
-             <div className="animate-in slide-in-from-right-4 duration-300">
+             <div className="">
                {logsLoading ? (
                  <div className="flex flex-col items-center justify-center py-12 text-slate-300 gap-3">
                    <RefreshCw className="animate-spin" size={20} />
@@ -410,12 +451,18 @@ export const NodeDetail: FC<NodeDetailProps> = ({ runId, nodeId, nodeState, agen
         </div>
       </div>
 
-      {activeTab === 'output' && !autoScroll && (
+      {['output', 'thinking', 'stdout', 'stderr'].includes(activeTab) && !autoScroll && (
         <button 
-          onClick={() => setAutoScroll(true)}
-          className="absolute bottom-6 right-6 bg-blue-600 text-white p-3 rounded-full shadow-2xl hover:bg-blue-700 transition-all hover:scale-110 active:scale-90 animate-bounce ring-4 ring-white"
+          onClick={() => {
+            setAutoScroll(true);
+            if (scrollRef.current) {
+               scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
+          }}
+          className="absolute bottom-6 right-6 bg-blue-600/90 backdrop-blur-sm text-white px-4 py-2.5 rounded-full shadow-2xl shadow-blue-500/40 hover:bg-blue-700 transition-all hover:scale-105 active:scale-95 ring-4 ring-white flex items-center gap-2 font-black text-[10px] uppercase tracking-widest z-50 group"
         >
-          <ChevronDown size={18} />
+          <span className="opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Latest</span>
+          <ChevronDown size={14} className="" />
         </button>
       )}
     </div>

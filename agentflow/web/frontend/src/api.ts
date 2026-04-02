@@ -34,13 +34,13 @@ export interface NodeState {
 }
 
 export const fetchRuns = async (): Promise<Run[]> => {
-  const res = await fetch('/api/runs');
+  const res = await fetch(`/api/runs?t=${Date.now()}`);
   if (!res.ok) throw new Error('Failed to fetch runs');
   return res.json();
 };
 
 export const fetchRun = async (id: string): Promise<Run> => {
-  const res = await fetch(`/api/runs/${id}`);
+  const res = await fetch(`/api/runs/${id}?t=${Date.now()}`);
   if (!res.ok) throw new Error('Failed to fetch run');
   return res.json();
 };
@@ -72,13 +72,13 @@ export interface Health {
 }
 
 export const fetchHealth = async (): Promise<Health> => {
-  const res = await fetch('/api/health');
+  const res = await fetch(`/api/health?t=${Date.now()}`);
   if (!res.ok) throw new Error('Failed to fetch health');
   return res.json();
 };
 
 export const fetchArtifactContent = async (runId: string, nodeId: string, name: string): Promise<string> => {
-  const res = await fetch(`/api/runs/${runId}/artifacts/${nodeId}/${name}`);
+  const res = await fetch(`/api/runs/${runId}/artifacts/${nodeId}/${name}?t=${Date.now()}`);
   if (!res.ok) throw new Error('Artifact not found');
   return res.text();
 };

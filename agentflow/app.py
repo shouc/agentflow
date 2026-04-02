@@ -181,17 +181,6 @@ def create_app(*, store: RunStore | None = None, orchestrator: Orchestrator | No
         except Exception as exc:
             raise HTTPException(status_code=404, detail="scratchboard not found") from exc
 
-    @app.get("/api/runs/{run_id}/scratchboard")
-    async def get_scratchboard(run_id: str) -> PlainTextResponse:
-        from agentflow.scratchboard import SCRATCHBOARD_FILENAME
-        try:
-            path = app.state.store.run_dir(run_id) / SCRATCHBOARD_FILENAME
-            if not path.exists():
-                return PlainTextResponse("")
-            return PlainTextResponse(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            raise HTTPException(status_code=404, detail="scratchboard not found") from exc
-
     @app.get("/api/runs/{run_id}/stream")
     async def stream_run(run_id: str):
         if run_id not in {run.id for run in app.state.store.list_runs()}:

@@ -57,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ runs, activeRunId, onSelectRun
   };
 
   return (
-    <div className="w-72 flex flex-col h-full bg-slate-50 border-r border-slate-200 shrink-0 select-none">
+    <div className="w-full flex flex-col h-full bg-slate-50 border-r border-slate-200 shrink-0 select-none">
       <div className="p-4 border-b border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 flex items-center gap-2">

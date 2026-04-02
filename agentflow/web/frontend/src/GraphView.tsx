@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { ReactFlow, Background, Controls, MarkerType } from '@xyflow/react';
+import React, { useMemo, useEffect } from 'react';
+import { ReactFlow, Background, Controls, MarkerType, ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { Run } from './api';
@@ -7,6 +7,8 @@ import type { Run } from './api';
 interface GraphViewProps {
   run: Run | null;
   onSelectNode: (nodeId: string) => void;
+  sidebarWidth?: number;
+  rightPanelWidth?: number;
 }
 
 const statusColor = (status?: string) => {
@@ -31,9 +33,12 @@ const statusBorder = (status?: string) => {
   }
 };
 
-export const GraphView: React.FC<GraphViewProps> = ({ run, onSelectNode }) => {
+const GraphContent: React.FC<GraphViewProps> = ({ run, onSelectNode, sidebarWidth, rightPanelWidth }) => {
+  const { fitView } = useReactFlow();
+  
   const nodes: Node[] = useMemo(() => {
     if (!run?.pipeline?.nodes) return [];
+    // ... (rest of node logic)
     
     // Very simple layout horizontally by levels
     const levels: Record<string, number> = {};
@@ -61,7 +66,7 @@ export const GraphView: React.FC<GraphViewProps> = ({ run, onSelectNode }) => {
       levelCounts[level] = count + 1;
       
       const nodeState = run.nodes?.[n.id];
-      const status = nodeState?.status || 'pending';
+      const status = nodeState?.status || 'waiting';
       const bgColor = statusBorder(status);
       const textColor = statusColor(status);
 
@@ -107,7 +112,14 @@ export const GraphView: React.FC<GraphViewProps> = ({ run, onSelectNode }) => {
     return newEdges;
   }, [run]);
 
-  if (!run) return <div className="flex-1 flex items-center justify-center text-slate-400">No Run Selected</div>;
+  // Automatically fit view when container dimensions change or new nodes are added
+  useEffect(() => {
+    // Only fit view when sidebars move or the number of nodes changes. 
+    // Do NOT fit view just because a node status (color) changed.
+    fitView({ duration: 0 });
+  }, [nodes.length, fitView, sidebarWidth, rightPanelWidth]);
+
+  if (!run) return <div className="flex-1 flex items-center justify-center text-slate-400 font-bold bg-slate-50 uppercase tracking-widest text-[10px]">No Run Selected</div>;
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
@@ -117,6 +129,9 @@ export const GraphView: React.FC<GraphViewProps> = ({ run, onSelectNode }) => {
           edges={edges} 
           onNodeClick={(_: React.MouseEvent, node: Node) => onSelectNode(node.id)}
           fitView
+          minZoom={0.2}
+          maxZoom={1.5}
+          fitViewOptions={{ padding: 0.2 }}
         >
           <Background color="#cbd5e1" gap={16} />
           <Controls />
@@ -125,3 +140,9 @@ export const GraphView: React.FC<GraphViewProps> = ({ run, onSelectNode }) => {
     </div>
   );
 };
+
+export const GraphView: React.FC<GraphViewProps> = (props) => (
+  <ReactFlowProvider>
+    <GraphContent {...props} />
+  </ReactFlowProvider>
+);
