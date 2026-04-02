@@ -24,6 +24,7 @@ from agentflow.doctor import (
     DoctorReport,
     LocalToolchainReport,
     ShellBridgeRecommendation,
+    build_pipeline_skill_policy_context,
     build_bash_login_shell_bridge_recommendation,
     build_local_kimi_toolchain_report,
     build_local_kimi_bootstrap_doctor_report,
@@ -813,21 +814,29 @@ def _doctor_report_for_path(path: str | None = None) -> tuple[object, dict[str, 
         except typer.Exit:
             return report, None, None
         include_ok_local_checks = _include_ok_local_preflight_checks(selected_path, pipeline)
+        pipeline_context = {"auto_preflight": _auto_smoke_preflight_metadata(selected_path, pipeline)}
+        skill_policy_context = build_pipeline_skill_policy_context(pipeline)
+        if skill_policy_context:
+            pipeline_context.update(skill_policy_context)
         return (
             _augment_preflight_report(
                 report,
                 pipeline,
                 include_ok_local_checks=include_ok_local_checks,
             ),
-            {"auto_preflight": _auto_smoke_preflight_metadata(selected_path, pipeline)},
+            pipeline_context,
             pipeline,
         )
     pipeline = _load_pipeline(path)
     report = _preflight_base_report(path, pipeline)
     include_ok_local_checks = _include_ok_local_preflight_checks(path, pipeline)
+    pipeline_context = {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)}
+    skill_policy_context = build_pipeline_skill_policy_context(pipeline)
+    if skill_policy_context:
+        pipeline_context.update(skill_policy_context)
     return (
         _augment_preflight_report(report, pipeline, include_ok_local_checks=include_ok_local_checks),
-        {"auto_preflight": _auto_smoke_preflight_metadata(path, pipeline)},
+        pipeline_context,
         pipeline,
     )
 
@@ -1574,6 +1583,9 @@ def _load_pipeline_with_optional_smoke_preflight(
             preflight_context = {
                 "auto_preflight": _auto_smoke_preflight_metadata(path or selected_path, preflight_pipeline)
             }
+            skill_policy_context = build_pipeline_skill_policy_context(preflight_pipeline)
+            if skill_policy_context:
+                preflight_context.update(skill_policy_context)
         if report.status == "failed":
             _echo_doctor_report(
                 report,
@@ -1621,6 +1633,38 @@ def _render_shell_bridge_summary(shell_bridge: object | None) -> str:
             getattr(shell_bridge, "snippet", "").rstrip(),
         ]
     )
+
+
+def _render_skill_policy_summary_lines(pipeline: dict[str, object] | None) -> list[str]:
+    if not isinstance(pipeline, dict):
+        return []
+
+    skill_policy = pipeline.get("skill_policy")
+    if not isinstance(skill_policy, dict):
+        return []
+
+    lines: list[str] = []
+    owned_roots = [str(root) for root in skill_policy.get("owned_roots", []) if isinstance(root, str) and root]
+    if owned_roots:
+        lines.append(f"Pipeline skill roots: AgentFlow-owned `.agents/skills/` -> {', '.join(owned_roots)}")
+
+    target_roots = [str(root) for root in skill_policy.get("target_roots", []) if isinstance(root, str) and root]
+    target_suffix = f" -> {', '.join(target_roots)}" if target_roots else ""
+    if skill_policy.get("default_target_repo_skill_trust") is False:
+        lines.append(f"Pipeline target repo skills: ignored by default{target_suffix}")
+
+    trusted_nodes = [str(node_id) for node_id in skill_policy.get("trusted_nodes", []) if isinstance(node_id, str) and node_id]
+    if trusted_nodes:
+        lines.append(f"Pipeline target repo skill trust: enabled for {', '.join(trusted_nodes)}")
+
+    boundary = skill_policy.get("repo_instructions_boundary")
+    if isinstance(boundary, str) and boundary.strip():
+        lines.append(
+            "Pipeline repo instructions: separate from skill trust; use `repo_instructions_mode` for `AGENTS.md`, "
+            "`CLAUDE.md`, and related instruction files."
+        )
+
+    return lines
 
 
 def _doctor_check_summary_suffix(check: object) -> str:
@@ -1672,6 +1716,7 @@ def _render_doctor_summary(
             rendered_matches = [match for match in matches if isinstance(match, str) and match]
             if rendered_matches:
                 lines.append(f"{auto_preflight_label} matches: {', '.join(rendered_matches)}")
+    lines.extend(_render_skill_policy_summary_lines(pipeline))
     if include_shell_bridge:
         lines.append(_render_shell_bridge_summary(shell_bridge))
     return "\n".join(lines)
