@@ -2325,7 +2325,18 @@ def exec_command(
         help="Output format. Defaults to raw text on a terminal and json otherwise.",
     ),
 ) -> None:
-    """Run a single agent with a prompt. Prints the agent's response."""
+    """Run a single agent with a prompt and print the response.
+
+    Examples:
+
+      agentflow exec gemini "What's trending on GitHub?"
+
+      agentflow exec claude "Review this code" --tools read_only
+
+      agentflow exec codex "Fix the test" --tools read_write -m gpt-4.1
+
+      agentflow exec shell "ls -la" --output text
+    """
     if not prompt.strip():
         raise typer.BadParameter("Prompt cannot be empty.")
 
